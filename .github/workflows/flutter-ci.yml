@@ -17,8 +17,11 @@ on:
       - "appimage/**"
       - "flatpak/**"
 
+permissions:
+  contents: write
+
 jobs:
   run-ci:
     uses: ./.github/workflows/flutter-build.yml
     with:
-      upload-artifact: false
+      upload-artifact: ${{ github.event_name == 'workflow_dispatch' }}
