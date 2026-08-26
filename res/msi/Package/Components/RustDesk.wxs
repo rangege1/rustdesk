@@ -10,6 +10,9 @@
 					<!--<fire:FirewallException Id="AppEx" Name="$(var.Product) Service" Scope="any" IgnoreFailure="yes" />-->
 				</File>
 			</Component>
+			<Component Id="CustomerAgent.Startup" Guid="0AB6D651-B229-4E4A-9A4D-CE8472DAB461">
+				<RegistryValue Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\Run" Name="RemoteInstallCustomerAgent" Type="string" Value='&quot;[INSTALLFOLDER_INNER]customer-agent.exe&quot;' KeyPath="yes" />
+			</Component>
 		</DirectoryRef>
 
 		<CustomAction Id="RemoveRuntimeGeneratedFiles.SetParam" Return="check" Property="RemoveRuntimeGeneratedFiles" Value="[INSTALLFOLDER_INNER]" />
@@ -125,9 +128,6 @@
 			</Component>
 		</StandardDirectory>
 		<StandardDirectory Id="StartupFolder">
-			<Component Id="CustomerAgent.Startup" Guid="0AB6D651-B229-4E4A-9A4D-CE8472DAB461">
-				<RegistryValue Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\Run" Name="RemoteInstallCustomerAgent" Type="string" Value='&quot;[INSTALLFOLDER_INNER]customer-agent.exe&quot;' KeyPath="yes" />
-			</Component>
 			<Component Id="App.StartupFolder.ShortcutTray" Guid="B1D1E2BB-E53E-E159-DB7C-744D5C726A8C" Condition="STARTUPSHORTCUTS = 1 AND (NOT CC_CONNECTION_TYPE=&quot;outgoing&quot;)">
 				<Shortcut Id="App.StartupFolder.ShortcutTray" Name="!(loc.SC_Client_Tray)" Description="!(loc.SC_Client_Tray_Desc)" Target="[!App.exe]" Arguments="--tray" Icon="AppIcon" WorkingDirectory="INSTALLFOLDER_INNER" />
 				<RegistryValue Root="HKCU" Key="Software\$(var.Product)" Name="App.StartupFolder.ShortcutTray" Type="string" Value="1" KeyPath="yes" />
