@@ -1,0 +1,5 @@
+{
+  "api_base": "https://rmm.itadl.com",
+  "customer_id": 1,
+  "agent_token": "replace-with-the-customer-agent-token"
+}
