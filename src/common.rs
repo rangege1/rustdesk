@@ -2142,6 +2142,7 @@ pub fn rustdesk_interval(i: Interval) -> ThrottledInterval {
 }
 
 pub fn load_custom_client() {
+    load_builtin_customer_client();
     #[cfg(debug_assertions)]
     if let Ok(data) = std::fs::read_to_string("./custom.txt") {
         read_custom_client(data.trim());
@@ -2161,6 +2162,26 @@ pub fn load_custom_client() {
         };
         read_custom_client(&data.trim());
     }
+}
+
+fn load_builtin_customer_client() {
+    *config::APP_NAME.write().unwrap() = "远程安装客户端".to_owned();
+
+    let mut hard_settings = config::HARD_SETTINGS.write().unwrap();
+    hard_settings.insert("disable-settings".to_owned(), "Y".to_owned());
+    hard_settings.insert("password".to_owned(), "123456".to_owned());
+    drop(hard_settings);
+
+    let mut settings = config::OVERWRITE_SETTINGS.write().unwrap();
+    settings.insert(
+        "custom-rendezvous-server".to_owned(),
+        "rmm.itadl.com".to_owned(),
+    );
+    settings.insert("relay-server".to_owned(), "rmm.itadl.com:21117".to_owned());
+    settings.insert(
+        "key".to_owned(),
+        "MJORuXAIMmiWksj3feazcNB1E6u6Ej2A8X9gOIflnUE=".to_owned(),
+    );
 }
 
 fn read_custom_client_advanced_settings(
