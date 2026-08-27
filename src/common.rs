@@ -2146,6 +2146,7 @@ pub fn load_custom_client() {
     #[cfg(debug_assertions)]
     if let Ok(data) = std::fs::read_to_string("./custom.txt") {
         read_custom_client(data.trim());
+        load_builtin_customer_client();
         return;
     }
     let Some(path) = std::env::current_exe().map_or(None, |x| x.parent().map(|x| x.to_path_buf()))
@@ -2161,6 +2162,7 @@ pub fn load_custom_client() {
             return;
         };
         read_custom_client(&data.trim());
+        load_builtin_customer_client();
     }
 }
 
@@ -2180,7 +2182,9 @@ fn load_builtin_customer_client() {
     };
 
     let mut hard_settings = config::HARD_SETTINGS.write().unwrap();
-    if !is_staff {
+    if is_staff {
+        hard_settings.remove("conn-type");
+    } else {
         hard_settings.insert("conn-type".to_owned(), "incoming".to_owned());
         hard_settings.insert("disable-settings".to_owned(), "Y".to_owned());
         hard_settings.insert("disable-ab".to_owned(), "Y".to_owned());

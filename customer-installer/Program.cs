@@ -32,6 +32,12 @@ if (!IsAdministrator())
 
 try
 {
+    foreach (var process in Process.GetProcessesByName("rustdesk"))
+    {
+        try { process.Kill(true); } catch { }
+        process.Dispose();
+    }
+
     var payload = Assembly.GetExecutingAssembly().GetManifestResourceStream("payload.zip")
         ?? throw new InvalidOperationException("安装包载荷缺失");
 
