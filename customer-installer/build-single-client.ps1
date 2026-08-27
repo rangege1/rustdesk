@@ -29,7 +29,11 @@ try {
         Copy-Item $agent (Join-Path $payloadDir "customer-agent.exe") -Force
         $config = @{ api_base = $ApiBase.TrimEnd('/'); customer_id = $CustomerId; agent_token = $AgentToken } |
             ConvertTo-Json -Compress
-        Set-Content (Join-Path $payloadDir "agent-config.json") $config -Encoding UTF8
+        [IO.File]::WriteAllText(
+            (Join-Path $payloadDir "agent-config.json"),
+            $config,
+            [Text.UTF8Encoding]::new($false)
+        )
     }
 
     $zip = Join-Path $root "payload.zip"

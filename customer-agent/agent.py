@@ -74,7 +74,7 @@ class AgentConfig:
 
 def load_config() -> AgentConfig:
     try:
-        raw = json.loads(CONFIG_FILE.read_text(encoding="utf-8")) if CONFIG_FILE.exists() else {}
+        raw = json.loads(CONFIG_FILE.read_text(encoding="utf-8-sig")) if CONFIG_FILE.exists() else {}
     except Exception:
         LOGGER.exception("config_load_failed path=%s", CONFIG_FILE)
         raise
