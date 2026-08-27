@@ -2,6 +2,25 @@
 
 `build-single-client.ps1` 将已经编译好的 RustDesk 发布目录、`customer-agent.exe` 和某个客户的 Agent 配置封装成一个 Windows EXE。
 
+## 诊断日志
+
+客户版运行后，日志保存在客户电脑的：
+
+`C:\ProgramData\RemoteInstall\agent\logs\customer-agent.log`
+
+安装器启动、提权、解包和启动 Agent 的日志保存在：
+
+`C:\ProgramData\RemoteInstall\agent\logs\customer-installer.log`
+
+日志会自动轮转，最多保留约 8 MB。日志只记录时间、阶段、状态码、任务编号和错误类型，不记录 Agent Token、远程密码或安装密码。
+
+排查时在客户电脑 PowerShell 执行：
+
+```powershell
+Get-Content "$env:ProgramData\RemoteInstall\agent\logs\customer-agent.log" -Tail 100
+Get-Content "$env:ProgramData\RemoteInstall\agent\logs\customer-installer.log" -Tail 100
+```
+
 ```powershell
 .\build-single-client.ps1 `
   -RustDeskDir .\rustdesk `
