@@ -168,7 +168,7 @@ static bool IsAdministrator()
     return new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator);
 }
 
-static void StopProcesses(string processName)
+void StopProcesses(string processName)
 {
     var stopped = 0;
     foreach (var process in Process.GetProcessesByName(processName))
@@ -192,7 +192,7 @@ static void StopProcesses(string processName)
         Thread.Sleep(500);
 }
 
-static void ExtractWithRetry(ZipArchiveEntry entry, string target)
+void ExtractWithRetry(ZipArchiveEntry entry, string target)
 {
     IOException? lastError = null;
     for (var attempt = 1; attempt <= 8; attempt++)
