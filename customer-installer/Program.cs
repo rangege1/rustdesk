@@ -44,6 +44,13 @@ void ShowError(string message)
     catch { }
 }
 
+Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+Application.ThreadException += (_, args) =>
+{
+    Log($"ui_exception type={args.Exception.GetType().Name} message={args.Exception.Message}");
+    ShowError($"客户端启动失败：{args.Exception.Message}");
+};
+
 AppDomain.CurrentDomain.UnhandledException += (_, args) =>
     Log($"unhandled_exception terminating={args.IsTerminating} detail={args.ExceptionObject}");
 TaskScheduler.UnobservedTaskException += (_, args) =>
@@ -85,13 +92,8 @@ if (!IsAdministrator())
 
 try
 {
-    var killed = 0;
-    foreach (var process in Process.GetProcessesByName("rustdesk"))
-    {
-        try { process.Kill(true); killed++; } catch { }
-        process.Dispose();
-    }
-    Log($"rustdesk_processes_stopped count={killed}");
+    StopProcesses("rustdesk");
+    StopProcesses("customer-agent");
 
     var payload = Assembly.GetExecutingAssembly().GetManifestResourceStream("payload.zip")
         ?? throw new InvalidOperationException("安装包载荷缺失");
@@ -110,7 +112,7 @@ try
             continue;
         }
         Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-        entry.ExtractToFile(target, true);
+        ExtractWithRetry(entry, target);
     }
 
     var rustDesk = Path.Combine(installRoot, "rustdesk.exe");
@@ -144,11 +146,11 @@ try
         using var key = Microsoft.Win32.Registry.LocalMachine.CreateSubKey(
             @"Software\Microsoft\Windows\CurrentVersion\Run");
         key!.SetValue("RemoteInstallCustomerAgent", $"\"{agent}\"");
-        Process.Start(new ProcessStartInfo(agent) { WorkingDirectory = installRoot });
+        StartChild(agent, "customer-agent");
         Log("customer_agent_started");
     }
 
-    Process.Start(new ProcessStartInfo(rustDesk) { WorkingDirectory = installRoot });
+    StartChild(rustDesk, "rustdesk");
     Log($"rustdesk_started role={(isCustomer ? "customer" : "staff")}");
     Console.WriteLine(isCustomer ? "远程安装客户端安装完成" : "远程安装客服端安装完成");
     return 0;
@@ -164,6 +166,65 @@ static bool IsAdministrator()
 {
     using var identity = WindowsIdentity.GetCurrent();
     return new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator);
+}
+
+static void StopProcesses(string processName)
+{
+    var stopped = 0;
+    foreach (var process in Process.GetProcessesByName(processName))
+    {
+        try
+        {
+            process.Kill(true);
+            stopped++;
+        }
+        catch (Exception ex)
+        {
+            Log($"process_stop_failed name={processName} type={ex.GetType().Name}");
+        }
+        finally
+        {
+            process.Dispose();
+        }
+    }
+    Log($"processes_stopped name={processName} count={stopped}");
+    if (stopped > 0)
+        Thread.Sleep(500);
+}
+
+static void ExtractWithRetry(ZipArchiveEntry entry, string target)
+{
+    IOException? lastError = null;
+    for (var attempt = 1; attempt <= 8; attempt++)
+    {
+        try
+        {
+            entry.ExtractToFile(target, true);
+            return;
+        }
+        catch (IOException ex) when (attempt < 8)
+        {
+            lastError = ex;
+            Log($"payload_extract_retry file={entry.Name} attempt={attempt}");
+            Thread.Sleep(500);
+        }
+    }
+    throw new IOException($"无法写入文件 {entry.Name}，文件可能仍被其他程序占用", lastError);
+}
+
+static void StartChild(string executable, string name)
+{
+    var process = Process.Start(new ProcessStartInfo
+    {
+        FileName = executable,
+        WorkingDirectory = installRoot,
+        UseShellExecute = false,
+        CreateNoWindow = true,
+    });
+    if (process is null)
+        throw new InvalidOperationException($"无法启动 {name}");
+    Log($"child_process_started name={name} pid={process.Id}");
+    process.Dispose();
 }
 
 static string? PromptActivationCode()
