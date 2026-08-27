@@ -176,16 +176,22 @@ jobs:
           AGENT_TOKEN: ${{ secrets.CUSTOMER_AGENT_TOKEN }}
         run: |
           if (-not $env:CUSTOMER_ID -or -not $env:AGENT_TOKEN) {
-            Write-Host "Customer-specific EXE skipped: set repository variable CUSTOMER_ID and secret CUSTOMER_AGENT_TOKEN to build it."
-            exit 0
+            throw "客户单文件 EXE 未生成：请配置仓库变量 CUSTOMER_ID 和仓库 Secret CUSTOMER_AGENT_TOKEN。"
+          }
+          $agentExe = Join-Path $PWD "rustdesk/customer-agent.exe"
+          if (-not (Test-Path $agentExe)) {
+            throw "客户单文件 EXE 未生成：找不到 $agentExe。"
           }
           pwsh ./customer-installer/build-single-client.ps1 `
             -RustDeskDir ./rustdesk `
             -Role customer `
-            -AgentExe ./rustdesk/customer-agent.exe `
+            -AgentExe $agentExe `
             -CustomerId ([int]$env:CUSTOMER_ID) `
             -AgentToken $env:AGENT_TOKEN `
             -Output ./SignOutput/remote-install-client-x86_64.exe
+          if (-not (Test-Path ./SignOutput/remote-install-client-x86_64.exe)) {
+            throw "客户单文件 EXE 未生成。"
+          }
           Get-FileHash ./SignOutput/remote-install-client-x86_64.exe -Algorithm SHA256
 
       - name: Build single-file staff EXE
@@ -197,9 +203,23 @@ jobs:
             -Output ./SignOutput/remote-install-staff-x86_64.exe
           Get-FileHash ./SignOutput/remote-install-staff-x86_64.exe -Algorithm SHA256
 
-      - name: Upload customer client
+      - name: Upload customer single-file client
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: customer-rustdesk-windows-x64
+          name: remote-install-customer-windows-x64
+          path: ./SignOutput/remote-install-client-x86_64.exe
+          if-no-files-found: error
+
+      - name: Upload staff client
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: remote-install-staff-windows-x64
+          path: ./SignOutput/remote-install-staff-x86_64.exe
+          if-no-files-found: error
+
+      - name: Upload all build artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: customer-rustdesk-build-artifacts
           path: ./SignOutput/
           if-no-files-found: error
