@@ -2169,8 +2169,13 @@ fn load_builtin_customer_client() {
 
     let mut hard_settings = config::HARD_SETTINGS.write().unwrap();
     hard_settings.insert("disable-settings".to_owned(), "Y".to_owned());
+    hard_settings.insert("disable-ab".to_owned(), "Y".to_owned());
     hard_settings.insert("password".to_owned(), "123456".to_owned());
     drop(hard_settings);
+
+    let mut local_settings = config::OVERWRITE_LOCAL_SETTINGS.write().unwrap();
+    local_settings.insert("disable-group-panel".to_owned(), "Y".to_owned());
+    drop(local_settings);
 
     let mut settings = config::OVERWRITE_SETTINGS.write().unwrap();
     settings.insert(
