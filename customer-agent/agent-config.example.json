@@ -1,5 +1,6 @@
 {
-  "api_base": "https://rmm.itadl.com",
+  "api_base": "https://rmm.itadl.com:8443",
   "customer_id": 1,
-  "agent_token": "replace-with-the-customer-agent-token"
+  "agent_token": "replace-with-the-customer-agent-token",
+  "installer_password": ""
 }

@@ -70,6 +70,7 @@ class AgentConfig:
     api_base: str
     customer_id: int
     agent_token: str
+    installer_password: str = ""
 
 
 def load_config() -> AgentConfig:
@@ -78,7 +79,7 @@ def load_config() -> AgentConfig:
     except Exception:
         LOGGER.exception("config_load_failed path=%s", CONFIG_FILE)
         raise
-    api_base = str(raw.get("api_base", os.environ.get("OPS_API", "https://rmm.itadl.com"))).rstrip("/")
+    api_base = str(raw.get("api_base", os.environ.get("OPS_API", "https://rmm.itadl.com:8443"))).rstrip("/")
     parsed = urlparse(api_base)
     if parsed.scheme not in {"https", "http"} or not parsed.netloc:
         raise ValueError("agent-config.json 的 api_base 必须是完整 HTTP(S) 地址")
@@ -89,7 +90,8 @@ def load_config() -> AgentConfig:
     if not customer_id or not agent_token:
         raise ValueError("请设置 customer_id 和 agent_token")
     LOGGER.info("config_loaded api_host=%s customer_id=%s config_path=%s", parsed.netloc, customer_id, CONFIG_FILE)
-    return AgentConfig(api_base, customer_id, agent_token)
+    installer_password = str(raw.get("installer_password", os.environ.get("OPS_INSTALLER_PASSWORD", "")))
+    return AgentConfig(api_base, customer_id, agent_token, installer_password)
 
 
 class CustomerAgent:
@@ -234,6 +236,7 @@ class CustomerAgent:
                     "install_path": task["install_path"],
                     "download_path": task["download_path"],
                     "status_file": str(status_file),
+                    "installer_password": self.config.installer_password,
                 },
                 ensure_ascii=False,
             ),
@@ -252,7 +255,15 @@ class CustomerAgent:
             return
         task = self.request(f"/api/agent/tasks?customer_id={self.config.customer_id}")
         if task:
-            self.start_task(task)
+            try:
+                self.start_task(task)
+            except Exception as exc:
+                task_id = int(task.get("id", 0))
+                message = f"客户 Agent 执行失败: {type(exc).__name__}: {exc}"
+                LOGGER.exception("task_start_failed task_id=%s", task_id)
+                if task_id:
+                    self.report(task_id, "failed", message)
+                raise
         elif time.monotonic() - self.last_empty_poll_log >= 60:
             LOGGER.info("task_poll_empty")
             self.last_empty_poll_log = time.monotonic()
