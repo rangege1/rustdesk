@@ -7,6 +7,7 @@
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <AssemblyName>远程安装客户端</AssemblyName>
     <RootNamespace>RemoteInstallCustomer</RootNamespace>
+    <ApplicationIcon>..\res\icon.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Program.cs" />

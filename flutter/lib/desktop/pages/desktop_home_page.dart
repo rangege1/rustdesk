@@ -143,6 +143,28 @@ class _DesktopHomePageState extends State<DesktopHomePage>
                       value: model.serverPasswd.text,
                       icon: Icons.key_outlined,
                     ),
+                    const SizedBox(height: 14),
+                    OutlinedButton.icon(
+                      onPressed: model.serverId.text.isEmpty ||
+                              model.serverPasswd.text.isEmpty
+                          ? null
+                          : () {
+                              final message = [
+                                'RustDesk:',
+                                '设备代码:${model.serverId.text}',
+                                '密码:${model.serverPasswd.text}',
+                              ].join('\n');
+                              Clipboard.setData(ClipboardData(text: message));
+                              showToast('设备信息已复制');
+                            },
+                      icon: const Icon(Icons.copy_all_outlined, size: 18),
+                      label: const Text('复制设备信息'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: blue,
+                        side: const BorderSide(color: blue),
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                      ),
+                    ),
                     const SizedBox(height: 24),
                     const Divider(height: 1, color: line),
                     const SizedBox(height: 18),
