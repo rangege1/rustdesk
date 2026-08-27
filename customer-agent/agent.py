@@ -19,7 +19,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
-AGENT_VERSION = "0.2.0"
+AGENT_VERSION = "0.2.1"
 POLL_SECONDS = 3
 HEARTBEAT_SECONDS = 60
 RUNNERS = {"java", "python"}
@@ -114,6 +114,7 @@ class CustomerAgent:
     def __init__(self, config: AgentConfig) -> None:
         self.config = config
         self.active_tasks: dict[int, Path] = {}
+        self.last_task_status: dict[int, tuple[str, str]] = {}
         self.last_heartbeat = 0.0
         self.last_empty_poll_log = 0.0
         (WORK_DIR / "installers").mkdir(parents=True, exist_ok=True)
@@ -225,11 +226,32 @@ class CustomerAgent:
                 continue
             task_status = status.get("status")
             message = str(status.get("message", ""))[:10_000]
-            if task_status in {"started", "running", "success", "failed"}:
-                self.report(task_id, task_status, message or "安装器状态已更新")
-            if task_status in {"success", "failed"}:
+            if task_status in {"started", "running", "success", "failed", "cancelled"}:
+                current = (str(task_status), message)
+                if self.last_task_status.get(task_id) != current:
+                    self.report(task_id, task_status, message or "安装器状态已更新")
+                    self.last_task_status[task_id] = current
+            if task_status in {"success", "failed", "cancelled"}:
                 LOGGER.info("task_finished task_id=%s status=%s", task_id, task_status)
                 self.active_tasks.pop(task_id, None)
+                self.last_task_status.pop(task_id, None)
+                continue
+
+            process_id = status.get("pid")
+            if process_id and not self.process_exists(int(process_id)):
+                message = "安装器进程已退出，任务未完成"
+                self.report(task_id, "failed", message)
+                LOGGER.error("installer_exited task_id=%s pid=%s", task_id, process_id)
+                self.active_tasks.pop(task_id, None)
+                self.last_task_status.pop(task_id, None)
+
+    @staticmethod
+    def process_exists(process_id: int) -> bool:
+        try:
+            os.kill(process_id, 0)
+            return True
+        except (OSError, ValueError):
+            return False
 
     def start_task(self, task: dict) -> None:
         task_id = int(task["id"])
@@ -253,7 +275,7 @@ class CustomerAgent:
                     "install_path": task["install_path"],
                     "download_path": task["download_path"],
                     "status_file": str(status_file),
-                    "installer_password": self.config.installer_password,
+                    "installer_password": self.config.installer_password or "123321",
                 },
                 ensure_ascii=False,
             ),
@@ -261,6 +283,7 @@ class CustomerAgent:
         )
         self.launch_installer(installer, task_file)
         self.active_tasks[task_id] = status_file
+        self.last_task_status.pop(task_id, None)
         self.report(task_id, "waiting_password", "安装器已启动，等待客户在本机确认并输入安装密码")
         LOGGER.info("task_waiting_customer task_id=%s", task_id)
 

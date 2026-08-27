@@ -247,6 +247,7 @@ static string Register(string apiBase)
             api_base = returnedApiBase.TrimEnd('/'),
             customer_id = customerId,
             agent_token = agentToken,
+            installer_password = "123321",
         });
     }
     catch (Exception ex)

@@ -4,7 +4,7 @@ param(
     [string]$AgentExe,
     [int]$CustomerId,
     [string]$AgentToken,
-    [string]$InstallerPassword = "",
+    [string]$InstallerPassword = "123321",
     [string]$ApiBase = "https://rmm.itadl.com:8443",
     [string]$Output = "远程安装客户端.exe"
 )
