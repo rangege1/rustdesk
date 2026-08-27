@@ -171,13 +171,7 @@ jobs:
 
       - name: Build single-file customer EXE
         shell: pwsh
-        env:
-          CUSTOMER_ID: ${{ vars.CUSTOMER_ID }}
-          AGENT_TOKEN: ${{ secrets.CUSTOMER_AGENT_TOKEN }}
         run: |
-          if (-not $env:CUSTOMER_ID -or -not $env:AGENT_TOKEN) {
-            throw "客户单文件 EXE 未生成：请配置仓库变量 CUSTOMER_ID 和仓库 Secret CUSTOMER_AGENT_TOKEN。"
-          }
           $agentExe = Join-Path $PWD "rustdesk/customer-agent.exe"
           if (-not (Test-Path $agentExe)) {
             throw "客户单文件 EXE 未生成：找不到 $agentExe。"
@@ -186,8 +180,6 @@ jobs:
             -RustDeskDir ./rustdesk `
             -Role customer `
             -AgentExe $agentExe `
-            -CustomerId ([int]$env:CUSTOMER_ID) `
-            -AgentToken $env:AGENT_TOKEN `
             -Output ./SignOutput/remote-install-client-x86_64.exe
           if (-not (Test-Path ./SignOutput/remote-install-client-x86_64.exe)) {
             throw "客户单文件 EXE 未生成。"

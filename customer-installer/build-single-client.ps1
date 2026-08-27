@@ -13,8 +13,8 @@ $ErrorActionPreference = "Stop"
 $root = (Resolve-Path $PSScriptRoot).Path
 $rustDesk = (Resolve-Path $RustDeskDir).Path
 if ($Role -eq "customer") {
-    if (-not $AgentExe -or -not $CustomerId -or -not $AgentToken) {
-        throw "客户版需要 AgentExe、CustomerId 和 AgentToken"
+    if (-not $AgentExe) {
+        throw "客户版需要 AgentExe"
     }
     $agent = (Resolve-Path $AgentExe).Path
 }
@@ -28,13 +28,12 @@ try {
     Set-Content (Join-Path $payloadDir "ops-client-role.txt") $Role -Encoding ASCII
     if ($Role -eq "customer") {
         Copy-Item $agent (Join-Path $payloadDir "customer-agent.exe") -Force
-        $config = @{ api_base = $ApiBase.TrimEnd('/'); customer_id = $CustomerId; agent_token = $AgentToken; installer_password = $InstallerPassword } |
-            ConvertTo-Json -Compress
-        [IO.File]::WriteAllText(
-            (Join-Path $payloadDir "agent-config.json"),
-            $config,
-            [Text.UTF8Encoding]::new($false)
-        )
+        Set-Content (Join-Path $payloadDir "agent-api-base.txt") $ApiBase.TrimEnd('/') -Encoding ASCII
+        if ($CustomerId -and $AgentToken) {
+            $config = @{ api_base = $ApiBase.TrimEnd('/'); customer_id = $CustomerId; agent_token = $AgentToken; installer_password = $InstallerPassword } |
+                ConvertTo-Json -Compress
+            [IO.File]::WriteAllText((Join-Path $payloadDir "agent-config.json"), $config, [Text.UTF8Encoding]::new($false))
+        }
     }
 
     $zip = Join-Path $root "payload.zip"

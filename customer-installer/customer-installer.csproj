@@ -5,6 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>远程安装客户端</AssemblyName>
     <RootNamespace>RemoteInstallCustomer</RootNamespace>
     <ApplicationIcon>..\res\icon.ico</ApplicationIcon>
