@@ -112,6 +112,7 @@ class _RemotePageState extends State<RemotePage>
   late RxBool _remoteCursorMoved;
   late RxBool _keyboardEnabled;
   final _uniqueKey = UniqueKey();
+  bool _adaptiveViewInitialized = false;
 
   var _blockableOverlayState = BlockableOverlayState();
 
@@ -160,6 +161,7 @@ class _RemotePageState extends State<RemotePage>
       _ffi.canvasModel.activateLocalCursor();
       showKBLayoutTypeChooserIfNeeded(
           _ffi.ffiModel.pi.platform, _ffi.dialogManager);
+      unawaited(_setDefaultAdaptiveView());
       _ffi.recordingModel
           .updateStatus(bind.sessionGetIsRecording(sessionId: _ffi.sessionId));
     });
@@ -221,6 +223,22 @@ class _RemotePageState extends State<RemotePage>
     });
     if (_ffi.ffiModel.pi.isSet.value) {
       unawaited(_normalizeWaylandKeyboardModeIfNeeded());
+    }
+  }
+
+  Future<void> _setDefaultAdaptiveView() async {
+    if (_adaptiveViewInitialized || !isCustomClient || !isDesktop) return;
+    _adaptiveViewInitialized = true;
+    try {
+      final current = await bind.sessionGetViewStyle(sessionId: sessionId);
+      if (current == kRemoteViewStyleAdaptive) return;
+      await bind.sessionSetViewStyle(
+          sessionId: sessionId, value: kRemoteViewStyleAdaptive);
+      await _ffi.canvasModel.updateViewStyle();
+    } catch (e, stack) {
+      _adaptiveViewInitialized = false;
+      debugPrint('Failed to set default adaptive view: $e');
+      debugPrintStack(stackTrace: stack);
     }
   }
 
