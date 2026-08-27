@@ -212,7 +212,7 @@ void ExtractWithRetry(ZipArchiveEntry entry, string target)
     throw new IOException($"无法写入文件 {entry.Name}，文件可能仍被其他程序占用", lastError);
 }
 
-static void StartChild(string executable, string name)
+void StartChild(string executable, string name)
 {
     var process = Process.Start(new ProcessStartInfo
     {
