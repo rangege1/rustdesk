@@ -54,6 +54,7 @@ pub fn core_main() -> Option<Vec<String>> {
             #[cfg(feature = "flutter")]
             if [
                 "--connect",
+                "--ops-connect",
                 "--play",
                 "--file-transfer",
                 "--view-camera",
@@ -112,7 +113,10 @@ pub fn core_main() -> Option<Vec<String>> {
         }
     }
     #[cfg(windows)]
-    if args.contains(&"--connect".to_string()) || args.contains(&"--view-camera".to_string()) {
+    if args.contains(&"--connect".to_string())
+        || args.contains(&"--ops-connect".to_string())
+        || args.contains(&"--view-camera".to_string())
+    {
         hbb_common::platform::windows::start_cpu_performance_monitor();
     }
     #[cfg(feature = "flutter")]
@@ -774,9 +778,13 @@ fn core_main_invoke_new_connection(mut args: std::env::Args) -> Option<Vec<Strin
     let mut param_array = vec![];
     while let Some(arg) = args.next() {
         match arg.as_str() {
-            "--connect" | "--play" | "--file-transfer" | "--view-camera" | "--port-forward"
+            "--connect" | "--ops-connect" | "--play" | "--file-transfer" | "--view-camera" | "--port-forward"
             | "--terminal" | "--rdp" => {
-                authority = Some((&arg.to_string()[2..]).to_owned());
+                authority = Some(if arg == "--ops-connect" {
+                    "connect".to_owned()
+                } else {
+                    arg[2..].to_owned()
+                });
                 id = args.next();
             }
             "--password" => {
