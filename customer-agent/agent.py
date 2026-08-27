@@ -25,6 +25,22 @@ HEARTBEAT_SECONDS = 60
 RUNNERS = {"java", "python"}
 
 
+def machine_id() -> str:
+    """Return a stable, non-reversible identifier for this Windows install."""
+    raw = ""
+    if os.name == "nt":
+        try:
+            import winreg
+
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Cryptography") as key:
+                raw = str(winreg.QueryValueEx(key, "MachineGuid")[0])
+        except (OSError, ImportError):
+            pass
+    if not raw:
+        raw = socket.gethostname()
+    return hashlib.sha256(f"RemoteInstall:{raw}".encode("utf-8")).hexdigest()
+
+
 def executable_dir() -> Path:
     return Path(sys.executable if getattr(sys, "frozen", False) else __file__).resolve().parent
 
@@ -137,6 +153,7 @@ class CustomerAgent:
                 "computer_name": computer_name,
                 "windows_version": platform.platform(),
                 "free_disk_bytes": free_disk,
+                "machine_id": machine_id(),
             },
         )
         self.last_heartbeat = time.monotonic()

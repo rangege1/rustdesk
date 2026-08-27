@@ -135,10 +135,7 @@ try
             var apiBase = File.Exists(apiBasePath)
                 ? File.ReadAllText(apiBasePath).Trim().TrimEnd('/')
                 : "https://rmm.itadl.com:8443";
-            var activationCode = PromptActivationCode();
-            if (string.IsNullOrWhiteSpace(activationCode))
-                throw new InvalidOperationException("未完成激活，客户端未启动");
-            var config = Activate(apiBase, activationCode);
+            var config = Register(apiBase);
             File.WriteAllText(agentConfig, config, new System.Text.UTF8Encoding(false));
             Log("customer_activation_ok");
         }
@@ -227,46 +224,24 @@ void StartChild(string executable, string name)
     process.Dispose();
 }
 
-static string? PromptActivationCode()
-{
-    using var form = new Form
-    {
-        Text = "激活远程安装服务",
-        Width = 430,
-        Height = 190,
-        StartPosition = FormStartPosition.CenterScreen,
-        FormBorderStyle = FormBorderStyle.FixedDialog,
-        MaximizeBox = false,
-        MinimizeBox = false,
-    };
-    var label = new Label { Left = 20, Top = 20, Width = 370, Text = "请输入客服提供的激活码：" };
-    var input = new TextBox { Left = 20, Top = 52, Width = 370, PlaceholderText = "例如 RI-AB12CD34" };
-    var cancel = new Button { Text = "取消", Left = 220, Top = 95, Width = 80, DialogResult = DialogResult.Cancel };
-    var confirm = new Button { Text = "激活", Left = 310, Top = 95, Width = 80, DialogResult = DialogResult.OK };
-    form.Controls.AddRange([label, input, cancel, confirm]);
-    form.AcceptButton = confirm;
-    form.CancelButton = cancel;
-    return form.ShowDialog() == DialogResult.OK ? input.Text.Trim() : null;
-}
-
-static string Activate(string apiBase, string activationCode)
+static string Register(string apiBase)
 {
     try
     {
         using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
         using var response = client.PostAsJsonAsync(
-            $"{apiBase}/api/agent/activate",
-            new { activation_code = activationCode, machine_id = GetMachineId() }).GetAwaiter().GetResult();
+            $"{apiBase}/api/agent/register",
+            new { machine_id = GetMachineId(), computer_name = Environment.MachineName }).GetAwaiter().GetResult();
         var body = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
         if (!response.IsSuccessStatusCode)
-            throw new InvalidOperationException($"激活失败，服务器返回 HTTP {(int)response.StatusCode}");
+            throw new InvalidOperationException($"设备注册失败，服务器返回 HTTP {(int)response.StatusCode}");
         using var json = JsonDocument.Parse(body);
         var root = json.RootElement;
         var returnedApiBase = root.GetProperty("api_base").GetString() ?? apiBase;
         var customerId = root.GetProperty("customer_id").GetInt32();
         var agentToken = root.GetProperty("agent_token").GetString();
         if (string.IsNullOrWhiteSpace(agentToken))
-            throw new InvalidOperationException("服务器返回的激活配置不完整");
+            throw new InvalidOperationException("服务器返回的设备配置不完整");
         return JsonSerializer.Serialize(new
         {
             api_base = returnedApiBase.TrimEnd('/'),
@@ -276,8 +251,8 @@ static string Activate(string apiBase, string activationCode)
     }
     catch (Exception ex)
     {
-        MessageBox.Show($"激活失败：{ex.Message}", "远程安装服务", MessageBoxButtons.OK, MessageBoxIcon.Error);
-        throw new InvalidOperationException("激活失败");
+        MessageBox.Show($"设备注册失败：{ex.Message}", "远程安装服务", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        throw new InvalidOperationException("设备注册失败");
     }
 }
 
