@@ -24,7 +24,16 @@ $publishDir = Join-Path $stage "publish"
 New-Item -ItemType Directory -Force $payloadDir | Out-Null
 
 try {
-    Copy-Item (Join-Path $rustDesk "*") $payloadDir -Recurse -Force
+    # Only package the RustDesk runtime. Build outputs, symbols, optional drivers,
+    # and helper archives can make the self-extracting EXE unnecessarily large.
+    Copy-Item (Join-Path $rustDesk "rustdesk.exe") $payloadDir -Force
+    Get-ChildItem $rustDesk -File -Filter "*.dll" | Copy-Item -Destination $payloadDir -Force
+    foreach ($directory in @("data")) {
+        $sourceDirectory = Join-Path $rustDesk $directory
+        if (Test-Path $sourceDirectory) {
+            Copy-Item $sourceDirectory (Join-Path $payloadDir $directory) -Recurse -Force
+        }
+    }
     Set-Content (Join-Path $payloadDir "ops-client-role.txt") $Role -Encoding ASCII
     if ($Role -eq "customer") {
         Copy-Item $agent (Join-Path $payloadDir "customer-agent.exe") -Force

@@ -2,7 +2,10 @@ using System.Diagnostics;
 using System.IO.Compression;
 using System.Net.Http.Json;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Security.Principal;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Windows.Forms;
 
@@ -16,10 +19,40 @@ void Log(string message)
         Directory.CreateDirectory(Path.GetDirectoryName(logFile)!);
         File.AppendAllText(logFile, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {message}{Environment.NewLine}");
     }
+    catch
+    {
+        try
+        {
+            File.AppendAllText(
+                Path.Combine(Path.GetTempPath(), "RemoteInstallClient-startup.log"),
+                $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {message}{Environment.NewLine}");
+        }
+        catch { }
+    }
+}
+
+void ShowError(string message)
+{
+    try
+    {
+        MessageBox.Show(
+            $"{message}\n\n详细日志：{logFile}",
+            "远程安装客户端",
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Error);
+    }
     catch { }
 }
 
-Log($"installer_start pid={Environment.ProcessId}");
+AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+    Log($"unhandled_exception terminating={args.IsTerminating} detail={args.ExceptionObject}");
+TaskScheduler.UnobservedTaskException += (_, args) =>
+{
+    Log($"unobserved_task_exception detail={args.Exception}");
+    args.SetObserved();
+};
+
+Log($"installer_start pid={Environment.ProcessId} os={Environment.OSVersion} arch={RuntimeInformation.ProcessArchitecture} 64bit={Environment.Is64BitOperatingSystem}");
 
 if (!OperatingSystem.IsWindows())
 {
@@ -45,7 +78,7 @@ if (!IsAdministrator())
     catch (Exception ex)
     {
         Log($"admin_elevation_failed type={ex.GetType().Name}");
-        Console.Error.WriteLine($"管理员授权失败: {ex.Message}");
+        ShowError($"管理员授权失败：{ex.Message}");
         return 1;
     }
 }
@@ -123,7 +156,7 @@ try
 catch (Exception ex)
 {
     Log($"installer_failed type={ex.GetType().Name} message={ex.Message.Replace("\r", " ").Replace("\n", " ")}");
-    Console.Error.WriteLine($"安装失败: {ex.Message}");
+    ShowError($"启动失败：{ex.Message}");
     return 1;
 }
 
@@ -162,10 +195,10 @@ static string Activate(string apiBase, string activationCode)
         using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
         using var response = client.PostAsJsonAsync(
             $"{apiBase}/api/agent/activate",
-            new { activation_code = activationCode }).GetAwaiter().GetResult();
+            new { activation_code = activationCode, machine_id = GetMachineId() }).GetAwaiter().GetResult();
         var body = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
         if (!response.IsSuccessStatusCode)
-            throw new InvalidOperationException("激活码无效或已失效");
+            throw new InvalidOperationException($"激活失败，服务器返回 HTTP {(int)response.StatusCode}");
         using var json = JsonDocument.Parse(body);
         var root = json.RootElement;
         var returnedApiBase = root.GetProperty("api_base").GetString() ?? apiBase;
@@ -185,4 +218,22 @@ static string Activate(string apiBase, string activationCode)
         MessageBox.Show($"激活失败：{ex.Message}", "远程安装服务", MessageBoxButtons.OK, MessageBoxIcon.Error);
         throw new InvalidOperationException("激活失败");
     }
+}
+
+static string GetMachineId()
+{
+    try
+    {
+        using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
+            @"SOFTWARE\Microsoft\Cryptography");
+        var value = key?.GetValue("MachineGuid")?.ToString();
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            var bytes = SHA256.HashData(Encoding.UTF8.GetBytes($"RemoteInstall:{value}"));
+            return Convert.ToHexString(bytes).ToLowerInvariant();
+        }
+    }
+    catch { }
+    return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
+        $"RemoteInstall:{Environment.MachineName}"))).ToLowerInvariant();
 }
