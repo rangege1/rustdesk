@@ -37,10 +37,10 @@ try {
     Compress-Archive -Path (Join-Path $payloadDir "*") -DestinationPath $zip -CompressionLevel Optimal
     dotnet publish (Join-Path $root "customer-installer.csproj") -c Release -r win-x64 --self-contained true `
         /p:PublishSingleFile=true /p:IncludeNativeLibrariesForSelfExtract=true -o $publishDir
-    $exe = Join-Path $publishDir "远程安装客户端.exe"
-    if (-not (Test-Path $exe)) { throw "单文件客户端没有生成" }
+    $exe = Get-ChildItem -Path $publishDir -Filter *.exe -File | Select-Object -First 1
+    if (-not $exe) { throw "单文件客户端没有生成" }
     $outputPath = if ([IO.Path]::IsPathRooted($Output)) { $Output } else { Join-Path (Get-Location) $Output }
-    Copy-Item $exe $outputPath -Force
+    Copy-Item $exe.FullName $outputPath -Force
     Write-Host "Created: $outputPath"
 }
 finally {
