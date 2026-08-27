@@ -2170,7 +2170,7 @@ fn load_builtin_customer_client() {
     let mut hard_settings = config::HARD_SETTINGS.write().unwrap();
     hard_settings.insert("disable-settings".to_owned(), "Y".to_owned());
     hard_settings.insert("disable-ab".to_owned(), "Y".to_owned());
-    hard_settings.insert("password".to_owned(), "123456".to_owned());
+    hard_settings.insert("password".to_owned(), "y9hikt".to_owned());
     drop(hard_settings);
 
     let mut local_settings = config::OVERWRITE_LOCAL_SETTINGS.write().unwrap();
