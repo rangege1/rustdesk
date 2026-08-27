@@ -10,6 +10,7 @@ import 'package:flutter_hbb/common/widgets/animated_rotation_widget.dart';
 import 'package:flutter_hbb/common/widgets/custom_password.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/desktop/pages/connection_page.dart';
+import 'package:flutter_hbb/desktop/pages/customer_support_widgets.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_setting_page.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_tab_page.dart';
 import 'package:flutter_hbb/desktop/widgets/update_progress.dart';
@@ -59,6 +60,9 @@ class _DesktopHomePageState extends State<DesktopHomePage>
   Widget build(BuildContext context) {
     super.build(context);
     final isIncomingOnly = bind.isIncomingOnly();
+    if (isIncomingOnly && bind.isCustomClient()) {
+      return buildCustomerSupportPage(context);
+    }
     return _buildBlock(
         child: Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -68,6 +72,114 @@ class _DesktopHomePageState extends State<DesktopHomePage>
         if (!isIncomingOnly) Expanded(child: buildRightPane(context)),
       ],
     ));
+  }
+
+  Widget buildCustomerSupportPage(BuildContext context) {
+    const ink = Color(0xFF14233A);
+    const muted = Color(0xFF667085);
+    const line = Color(0xFFDCE3EC);
+    const blue = Color(0xFF1667D9);
+    return ChangeNotifierProvider.value(
+      value: gFFI.serverModel,
+      child: Container(
+        color: const Color(0xFFF5F7FA),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520),
+            child: Consumer<ServerModel>(
+              builder: (_, model, __) => Padding(
+                padding: const EdgeInsets.all(28),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(children: [
+                      Container(
+                        width: 40,
+                        height: 40,
+                        decoration: const BoxDecoration(
+                          color: blue,
+                          borderRadius: BorderRadius.all(Radius.circular(8)),
+                        ),
+                        child: const Icon(Icons.shield_outlined,
+                            color: Colors.white, size: 23),
+                      ),
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('远程安装服务',
+                                style: TextStyle(
+                                    color: ink,
+                                    fontSize: 19,
+                                    fontWeight: FontWeight.w700)),
+                            SizedBox(height: 2),
+                            Text('设备连接与软件安装支持',
+                                style: TextStyle(color: muted, fontSize: 13)),
+                          ],
+                        ),
+                      ),
+                      const CustomerStatusBadge(),
+                    ]),
+                    const SizedBox(height: 34),
+                    const Text('设备已就绪',
+                        style: TextStyle(
+                            color: ink,
+                            fontSize: 27,
+                            fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 8),
+                    const Text('请将下方设备信息发送给客服，以便提供远程安装服务。',
+                        style: TextStyle(color: muted, fontSize: 14)),
+                    const SizedBox(height: 24),
+                    CustomerCredential(
+                      label: '设备 ID',
+                      value: model.serverId.text,
+                      icon: Icons.desktop_windows_outlined,
+                    ),
+                    const SizedBox(height: 12),
+                    CustomerCredential(
+                      label: '临时密码',
+                      value: model.serverPasswd.text,
+                      icon: Icons.key_outlined,
+                    ),
+                    const SizedBox(height: 24),
+                    const Divider(height: 1, color: line),
+                    const SizedBox(height: 18),
+                    const Row(children: [
+                      Icon(Icons.download_done_outlined, color: blue, size: 20),
+                      SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('安装服务',
+                                style: TextStyle(
+                                    color: ink,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600)),
+                            SizedBox(height: 3),
+                            Text('等待客服发布安装任务',
+                                style: TextStyle(color: muted, fontSize: 13)),
+                          ],
+                        ),
+                      ),
+                    ]),
+                    const SizedBox(height: 28),
+                    const Row(children: [
+                      Icon(Icons.lock_outline, color: muted, size: 16),
+                      SizedBox(width: 8),
+                      Text('仅允许已授权客服连接本设备',
+                          style: TextStyle(color: muted, fontSize: 12)),
+                    ]),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _buildBlock({required Widget child}) {

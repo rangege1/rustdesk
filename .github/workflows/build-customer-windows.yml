@@ -169,6 +169,34 @@ jobs:
           mv $msi.FullName ../../SignOutput/rustdesk-${{ env.VERSION }}-x86_64.msi
           Get-FileHash ../../SignOutput/rustdesk-*.msi -Algorithm SHA256
 
+      - name: Build single-file customer EXE
+        shell: pwsh
+        env:
+          CUSTOMER_ID: ${{ vars.CUSTOMER_ID }}
+          AGENT_TOKEN: ${{ secrets.CUSTOMER_AGENT_TOKEN }}
+        run: |
+          if (-not $env:CUSTOMER_ID -or -not $env:AGENT_TOKEN) {
+            Write-Host "Customer-specific EXE skipped: set repository variable CUSTOMER_ID and secret CUSTOMER_AGENT_TOKEN to build it."
+            exit 0
+          }
+          pwsh ./customer-installer/build-single-client.ps1 `
+            -RustDeskDir ./rustdesk `
+            -Role customer `
+            -AgentExe ./rustdesk/customer-agent.exe `
+            -CustomerId ([int]$env:CUSTOMER_ID) `
+            -AgentToken $env:AGENT_TOKEN `
+            -Output ./SignOutput/remote-install-client-x86_64.exe
+          Get-FileHash ./SignOutput/remote-install-client-x86_64.exe -Algorithm SHA256
+
+      - name: Build single-file staff EXE
+        shell: pwsh
+        run: |
+          pwsh ./customer-installer/build-single-client.ps1 `
+            -RustDeskDir ./rustdesk `
+            -Role staff `
+            -Output ./SignOutput/remote-install-staff-x86_64.exe
+          Get-FileHash ./SignOutput/remote-install-staff-x86_64.exe -Algorithm SHA256
+
       - name: Upload customer client
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:

@@ -2165,16 +2165,33 @@ pub fn load_custom_client() {
 }
 
 fn load_builtin_customer_client() {
-    *config::APP_NAME.write().unwrap() = "远程安装客户端".to_owned();
+    let role_file = std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(|dir| dir.join("ops-client-role.txt")));
+    let is_staff = role_file
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .map(|role| role.trim().eq_ignore_ascii_case("staff"))
+        .unwrap_or(false);
+
+    *config::APP_NAME.write().unwrap() = if is_staff {
+        "远程安装客服端".to_owned()
+    } else {
+        "远程安装客户端".to_owned()
+    };
 
     let mut hard_settings = config::HARD_SETTINGS.write().unwrap();
-    hard_settings.insert("disable-settings".to_owned(), "Y".to_owned());
-    hard_settings.insert("disable-ab".to_owned(), "Y".to_owned());
+    if !is_staff {
+        hard_settings.insert("conn-type".to_owned(), "incoming".to_owned());
+        hard_settings.insert("disable-settings".to_owned(), "Y".to_owned());
+        hard_settings.insert("disable-ab".to_owned(), "Y".to_owned());
+    }
     hard_settings.insert("password".to_owned(), "y9hikt".to_owned());
     drop(hard_settings);
 
     let mut local_settings = config::OVERWRITE_LOCAL_SETTINGS.write().unwrap();
-    local_settings.insert("disable-group-panel".to_owned(), "Y".to_owned());
+    if !is_staff {
+        local_settings.insert("disable-group-panel".to_owned(), "Y".to_owned());
+    }
     drop(local_settings);
 
     let mut settings = config::OVERWRITE_SETTINGS.write().unwrap();
@@ -2187,6 +2204,9 @@ fn load_builtin_customer_client() {
         "key".to_owned(),
         "MJORuXAIMmiWksj3feazcNB1E6u6Ej2A8X9gOIflnUE=".to_owned(),
     );
+    if !is_staff {
+        settings.insert("hide-help-cards".to_owned(), "Y".to_owned());
+    }
 }
 
 fn read_custom_client_advanced_settings(
