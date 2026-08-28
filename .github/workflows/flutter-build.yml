@@ -381,7 +381,7 @@ jobs:
         if: env.UPLOAD_ARTIFACT == 'true'
         run: |
           python -m pip install pyinstaller
-          pyinstaller --noconfirm --clean --onefile --name customer-agent --distpath ./rustdesk ./customer-agent/agent.py
+          pyinstaller --noconfirm --clean --onefile --noconsole --name customer-agent --distpath ./rustdesk ./customer-agent/agent.py
           pushd ./res/msi
           python preprocess.py --arp -d ../../rustdesk
           nuget restore msi.sln
