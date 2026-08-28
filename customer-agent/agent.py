@@ -20,7 +20,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
-AGENT_VERSION = "0.2.2"
+AGENT_VERSION = "0.2.3"
 POLL_SECONDS = 3
 HEARTBEAT_SECONDS = 60
 RUNNERS = {"java", "python"}
@@ -289,6 +289,9 @@ class CustomerAgent:
 
     def start_task(self, task: dict) -> None:
         task_id = int(task["id"])
+        if task.get("kind", "install") == "cleanup":
+            self.cleanup_task(task_id, task.get("cleanup_targets", []))
+            return
         runner = str(task.get("runner", ""))
         software = task.get("software", [])
         versions = task.get("versions", {})
@@ -320,6 +323,29 @@ class CustomerAgent:
         self.last_task_status.pop(task_id, None)
         self.report(task_id, "waiting_password", "安装器已启动，等待客户在本机确认并输入安装密码")
         LOGGER.info("task_waiting_customer task_id=%s", task_id)
+
+    def cleanup_task(self, task_id: int, targets: object) -> None:
+        if not isinstance(targets, list):
+            raise ValueError("退款清理目标格式无效")
+        self.report(task_id, "running", "正在永久删除后台记录的软件文件")
+        removed: list[str] = []
+        for target in targets:
+            if not isinstance(target, dict):
+                raise ValueError("退款清理目标格式无效")
+            path = Path(str(target.get("path", ""))).resolve()
+            root = Path(str(target.get("root", ""))).resolve()
+            if path == root or root not in path.parents:
+                raise ValueError(f"拒绝删除非受控路径: {path}")
+            if not path.exists():
+                continue
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+            removed.append(str(path))
+            LOGGER.info("cleanup_removed task_id=%s path=%s", task_id, path)
+        message = "退款清理完成" if not removed else f"退款清理完成，已永久删除 {len(removed)} 项"
+        self.report(task_id, "success", message)
 
     def run_once(self) -> None:
         if time.monotonic() - self.last_heartbeat >= HEARTBEAT_SECONDS:
