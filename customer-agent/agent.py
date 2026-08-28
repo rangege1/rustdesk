@@ -20,7 +20,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
-AGENT_VERSION = "0.2.5"
+AGENT_VERSION = "0.2.6"
 POLL_SECONDS = 3
 HEARTBEAT_SECONDS = 60
 RUNNERS = {"java", "python"}
@@ -237,6 +237,30 @@ class CustomerAgent:
                 checks.append(install_path / f"idea_{version}" / "bin" / "idea64.exe")
             elif software == "mysql":
                 checks.append(install_path / "mysql" / "bin" / "mysqld.exe")
+            elif software == "eclipse":
+                checks.append(install_path / f"eclipse_{version}" / "eclipse.exe")
+            elif software == "android":
+                checks.append(install_path / version)
+            elif software == "navicat":
+                checks.append(install_path / f"navicat_{version}" / "navicat.exe")
+            elif software == "tomcat":
+                checks.append(install_path / f"tomcat_{version}" / "bin" / "catalina.bat")
+            elif software == "maven":
+                checks.append(install_path / f"maven_{version}" / "bin" / "mvn.cmd")
+            elif software == "workbench":
+                checks.append(install_path / f"mysql_{version}" / "MySQLWorkbench.exe")
+            elif software == "phpstudy":
+                checks.append(install_path / f"phpstudy_{version}" / "COM" / "phpstudy_pro.exe")
+            elif software == "pycharm":
+                checks.append(install_path / f"pycharm_{version}" / "bin" / "pycharm64.exe")
+            elif software == "python":
+                checks.append(install_path / f"python_{version}" / "python.exe")
+            elif software == "anaconda":
+                checks.append(install_path / "anaconda" / "Scripts" / "conda.exe")
+            elif software in {"pytorch", "tensorflow"}:
+                checks.append(install_path / "anaconda" / "envs" / version / "python.exe")
+            elif software == "sqlserver":
+                checks.append(install_path / version)
         return checks
 
     def download_installer(self, runner: str) -> Path:
