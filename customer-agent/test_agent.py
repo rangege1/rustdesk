@@ -31,6 +31,36 @@ class CustomerAgentTests(unittest.TestCase):
             stop.assert_called_once_with(1234)
             cleanup.assert_called_once_with(1)
 
+    def test_installer_exit_rechecks_all_install_paths_before_marking_success(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            requested = root / "D-soft" / "jdk_1.8.0_241" / "bin" / "java.exe"
+            installed = root / "C-soft" / "jdk_1.8.0_241" / "bin" / "java.exe"
+            installed.parent.mkdir(parents=True)
+            installed.touch()
+            status_file = root / "task.json"
+            status_file.write_text(json.dumps({"status": "running", "pid": 1234}), encoding="utf-8")
+            instance = agent.CustomerAgent(agent.AgentConfig("https://example.test", 1, "token"))
+            instance.active_tasks[1] = status_file
+            instance.task_install_checks[1] = [[requested, installed]]
+            with patch.object(instance, "process_exists", return_value=False), patch.object(instance, "report") as report:
+                instance.update_active_tasks()
+            report.assert_any_call(1, "success", "安装器已退出，已校验所有软件文件存在")
+            self.assertNotIn(1, instance.active_tasks)
+
+    def test_installer_exit_waits_for_elevated_process_to_finish(self):
+        with tempfile.TemporaryDirectory() as directory:
+            status_file = Path(directory) / "task.json"
+            status_file.write_text(json.dumps({"status": "running", "pid": 1234}), encoding="utf-8")
+            instance = agent.CustomerAgent(agent.AgentConfig("https://example.test", 1, "token"))
+            instance.active_tasks[1] = status_file
+            instance.active_task_started_at[1] = agent.time.monotonic()
+            instance.task_install_checks[1] = [[Path(directory) / "jdk" / "bin" / "java.exe"]]
+            with patch.object(instance, "process_exists", return_value=False), patch.object(instance, "report") as report:
+                instance.update_active_tasks()
+            report.assert_any_call(1, "running", "安装器已移交提权进程，正在等待安装完成并校验文件")
+            self.assertIn(1, instance.active_tasks)
+
 
 if __name__ == "__main__":
     unittest.main()

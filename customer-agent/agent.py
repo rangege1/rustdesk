@@ -20,11 +20,12 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
-AGENT_VERSION = "0.2.9"
+AGENT_VERSION = "0.2.10"
 POLL_SECONDS = 3
 HEARTBEAT_SECONDS = 60
 ARTIFACT_CLEANUP_INITIAL_DELAY_SECONDS = 15
 ARTIFACT_CLEANUP_MAX_DELAY_SECONDS = 300
+INSTALLER_COMPLETION_TIMEOUT_SECONDS = 30 * 60
 RUNNERS = {"java", "python"}
 RUSTDESK_ID_RE = re.compile(r"\d[\d\s-]{4,}\d")
 
@@ -142,7 +143,8 @@ class CustomerAgent:
         self.config = config
         self.active_tasks: dict[int, Path] = {}
         self.task_artifacts: dict[int, tuple[Path, Path, Path]] = {}
-        self.task_install_checks: dict[int, list[Path]] = {}
+        self.task_install_checks: dict[int, list[list[Path]]] = {}
+        self.active_task_started_at: dict[int, float] = {}
         self.artifact_cleanup_retries: dict[int, tuple[int, float]] = {}
         self.last_task_status: dict[int, tuple[str, str]] = {}
         self.last_heartbeat = 0.0
@@ -259,16 +261,15 @@ class CustomerAgent:
             LOGGER.warning("installer_stop_deferred pid=%s error=%s", process_id, exc)
 
     @staticmethod
-    def installation_checks(task: dict) -> list[Path]:
+    def installation_checks(task: dict) -> list[list[Path]]:
         install_paths = CustomerAgent.resolve_install_paths(str(task.get("install_path", "")))
         versions = task.get("versions", {})
         if not isinstance(versions, dict):
             return []
-        checks: list[Path] = []
+        checks: list[list[Path]] = []
 
-        def check(relative_path: str) -> Path:
-            candidates = [path / relative_path for path in install_paths]
-            return next((path for path in candidates if path.is_file()), candidates[0])
+        def check(relative_path: str) -> list[Path]:
+            return [path / relative_path for path in install_paths]
 
         for software in task.get("software", []):
             version = str(versions.get(software, ""))
@@ -305,6 +306,10 @@ class CustomerAgent:
             elif software == "sqlserver":
                 checks.append(check(version))
         return checks
+
+    @staticmethod
+    def missing_installation_checks(checks: list[list[Path]]) -> list[str]:
+        return [str(candidates[0]) for candidates in checks if not any(path.is_file() for path in candidates)]
 
     @staticmethod
     def resolve_install_paths(value: str) -> list[Path]:
@@ -397,17 +402,25 @@ class CustomerAgent:
                 self.active_tasks.pop(task_id, None)
                 self.last_task_status.pop(task_id, None)
                 self.task_install_checks.pop(task_id, None)
+                self.active_task_started_at.pop(task_id, None)
                 self.cleanup_task_artifacts(task_id)
                 continue
 
             process_id = status.get("pid")
             if process_id and not self.process_exists(int(process_id)):
-                checks = self.task_install_checks.pop(task_id, [])
-                missing = [str(path) for path in checks if not path.is_file()]
+                checks = self.task_install_checks.get(task_id, [])
+                missing = self.missing_installation_checks(checks)
                 if checks and not missing:
                     message = "安装器已退出，已校验所有软件文件存在"
                     self.report(task_id, "success", message)
                     LOGGER.info("installer_exit_verified task_id=%s pid=%s", task_id, process_id)
+                elif time.monotonic() - self.active_task_started_at.get(task_id, time.monotonic()) < INSTALLER_COMPLETION_TIMEOUT_SECONDS:
+                    message = "安装器已移交提权进程，正在等待安装完成并校验文件"
+                    current = ("running", message)
+                    if self.last_task_status.get(task_id) != current:
+                        self.report(task_id, *current)
+                        self.last_task_status[task_id] = current
+                    continue
                 else:
                     message = "安装器进程已退出，未检测到完成状态"
                     if missing:
@@ -416,6 +429,8 @@ class CustomerAgent:
                     LOGGER.error("installer_exited task_id=%s pid=%s missing=%s", task_id, process_id, missing)
                 self.active_tasks.pop(task_id, None)
                 self.last_task_status.pop(task_id, None)
+                self.task_install_checks.pop(task_id, None)
+                self.active_task_started_at.pop(task_id, None)
                 self.cleanup_task_artifacts(task_id)
 
     @staticmethod
@@ -465,6 +480,7 @@ class CustomerAgent:
         self.task_install_checks[task_id] = self.installation_checks(task)
         self.launch_installer(installer, task_file)
         self.active_tasks[task_id] = status_file
+        self.active_task_started_at[task_id] = time.monotonic()
         self.last_task_status.pop(task_id, None)
         self.report(task_id, "waiting_password", "安装器已启动，等待客户在本机确认并输入安装密码")
         LOGGER.info("task_waiting_customer task_id=%s", task_id)
