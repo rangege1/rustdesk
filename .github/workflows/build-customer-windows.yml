@@ -184,6 +184,7 @@ jobs:
           if (-not (Test-Path ./SignOutput/remote-install-client-x86_64.exe)) {
             throw "客户单文件 EXE 未生成。"
           }
+          Get-Item ./SignOutput/remote-install-client-x86_64.exe | Select-Object Name, @{Name = 'SizeMB'; Expression = { [math]::Round($_.Length / 1MB, 2) }}
           Get-FileHash ./SignOutput/remote-install-client-x86_64.exe -Algorithm SHA256
 
       - name: Build single-file staff EXE
@@ -193,6 +194,7 @@ jobs:
             -RustDeskDir ./rustdesk `
             -Role staff `
             -Output ./SignOutput/remote-install-staff-x86_64.exe
+          Get-Item ./SignOutput/remote-install-staff-x86_64.exe | Select-Object Name, @{Name = 'SizeMB'; Expression = { [math]::Round($_.Length / 1MB, 2) }}
           Get-FileHash ./SignOutput/remote-install-staff-x86_64.exe -Algorithm SHA256
 
       - name: Upload customer single-file client
