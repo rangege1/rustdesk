@@ -9,7 +9,8 @@ using System.Text;
 using System.Text.Json;
 using System.Windows.Forms;
 
-const string installRoot = @"C:\Program Files\RemoteInstallClient";
+const string customerInstallRoot = @"C:\Program Files\RemoteInstallCustomer";
+const string staffInstallRoot = @"C:\Program Files\RemoteInstallStaff";
 const string logFile = @"C:\ProgramData\RemoteInstall\agent\logs\customer-installer.log";
 const string rustDeskPermanentPassword = "abc123";
 
@@ -98,10 +99,17 @@ try
 
     var payload = Assembly.GetExecutingAssembly().GetManifestResourceStream("payload.zip")
         ?? throw new InvalidOperationException("安装包载荷缺失");
+    using var archive = new ZipArchive(payload, ZipArchiveMode.Read);
+
+    var roleEntry = archive.GetEntry("ops-client-role.txt")
+        ?? throw new InvalidOperationException("安装包缺少客户端角色信息");
+    using var roleReader = new StreamReader(roleEntry.Open());
+    var role = roleReader.ReadToEnd().Trim();
+    var isCustomer = string.Equals(role, "customer", StringComparison.OrdinalIgnoreCase);
+    var installRoot = isCustomer ? customerInstallRoot : staffInstallRoot;
 
     Directory.CreateDirectory(installRoot);
     Log($"payload_extract_start install_root={installRoot}");
-    using var archive = new ZipArchive(payload, ZipArchiveMode.Read);
     foreach (var entry in archive.Entries)
     {
         var target = Path.GetFullPath(Path.Combine(installRoot, entry.FullName));
@@ -117,8 +125,6 @@ try
     }
 
     var rustDesk = Path.Combine(installRoot, "rustdesk.exe");
-    var role = File.ReadAllText(Path.Combine(installRoot, "ops-client-role.txt")).Trim();
-    var isCustomer = string.Equals(role, "customer", StringComparison.OrdinalIgnoreCase);
     Log($"payload_extract_ok role={(isCustomer ? "customer" : "staff")}");
     if (!File.Exists(rustDesk))
         throw new InvalidOperationException("安装包不完整，缺少 RustDesk");
@@ -146,13 +152,13 @@ try
         key!.SetValue("RemoteInstallCustomerAgent", $"\"{agent}\"");
     }
 
-    StartChild(rustDesk, "rustdesk");
+    StartChild(rustDesk, "rustdesk", installRoot);
     Log($"rustdesk_started role={(isCustomer ? "customer" : "staff")}");
     if (isCustomer)
     {
-        SetRustDeskPassword(rustDesk);
+        SetRustDeskPassword(rustDesk, installRoot);
         var agent = Path.Combine(installRoot, "customer-agent.exe");
-        StartChild(agent, "customer-agent");
+        StartChild(agent, "customer-agent", installRoot);
         Log("customer_agent_started");
     }
     Console.WriteLine(isCustomer ? "远程安装客户端安装完成" : "远程安装客服端安装完成");
@@ -215,7 +221,7 @@ void ExtractWithRetry(ZipArchiveEntry entry, string target)
     throw new IOException($"无法写入文件 {entry.Name}，文件可能仍被其他程序占用", lastError);
 }
 
-void StartChild(string executable, string name)
+void StartChild(string executable, string name, string installRoot)
 {
     var process = Process.Start(new ProcessStartInfo
     {
@@ -230,7 +236,7 @@ void StartChild(string executable, string name)
     process.Dispose();
 }
 
-void SetRustDeskPassword(string rustDesk)
+void SetRustDeskPassword(string rustDesk, string installRoot)
 {
     for (var attempt = 1; attempt <= 8; attempt++)
     {
