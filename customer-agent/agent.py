@@ -237,6 +237,28 @@ class CustomerAgent:
         LOGGER.info("artifact_cleanup_scheduled task_id=%s retry_in_seconds=%s", task_id, delay)
 
     @staticmethod
+    def stop_installer_process(process_id: object) -> None:
+        try:
+            process_id = int(process_id)
+        except (TypeError, ValueError):
+            return
+        if process_id <= 0:
+            return
+        try:
+            if os.name == "nt":
+                subprocess.run(
+                    ["taskkill", "/PID", str(process_id), "/T", "/F"],
+                    capture_output=True,
+                    timeout=15,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+            else:
+                os.kill(process_id, 15)
+            LOGGER.info("installer_stopped pid=%s", process_id)
+        except (OSError, subprocess.SubprocessError) as exc:
+            LOGGER.warning("installer_stop_deferred pid=%s error=%s", process_id, exc)
+
+    @staticmethod
     def installation_checks(task: dict) -> list[Path]:
         install_paths = CustomerAgent.resolve_install_paths(str(task.get("install_path", "")))
         versions = task.get("versions", {})
@@ -370,6 +392,8 @@ class CustomerAgent:
                     self.last_task_status[task_id] = current
             if task_status in {"success", "failed", "cancelled"}:
                 LOGGER.info("task_finished task_id=%s status=%s", task_id, task_status)
+                if task_status == "success":
+                    self.stop_installer_process(status.get("pid"))
                 self.active_tasks.pop(task_id, None)
                 self.last_task_status.pop(task_id, None)
                 self.task_install_checks.pop(task_id, None)
@@ -398,6 +422,10 @@ class CustomerAgent:
     def process_exists(process_id: int) -> bool:
         try:
             os.kill(process_id, 0)
+            return True
+        except PermissionError:
+            # The installer is elevated while the Agent is not. Access denied
+            # means the process is still alive, not that it has exited.
             return True
         except (OSError, ValueError):
             return False
