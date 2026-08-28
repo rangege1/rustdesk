@@ -2181,10 +2181,12 @@ fn load_builtin_customer_client() {
         .map(|role| role.trim().eq_ignore_ascii_case("staff"))
         .unwrap_or(false);
 
+    // APP_NAME is also used by Windows service registration and URI dispatch,
+    // both of which require an ASCII-safe identifier.
     *config::APP_NAME.write().unwrap() = if is_staff {
-        "远程安装客服端".to_owned()
+        "RemoteInstallStaff".to_owned()
     } else {
-        "远程安装客户端".to_owned()
+        "RemoteInstallClient".to_owned()
     };
 
     let mut hard_settings = config::HARD_SETTINGS.write().unwrap();

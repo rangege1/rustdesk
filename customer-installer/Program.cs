@@ -11,6 +11,7 @@ using System.Windows.Forms;
 
 const string customerInstallRoot = @"C:\Program Files\RemoteInstallCustomer";
 const string staffInstallRoot = @"C:\Program Files\RemoteInstallStaff";
+const string bootstrapRoot = @"C:\ProgramData\RemoteInstall\bootstrap";
 const string logFile = @"C:\ProgramData\RemoteInstall\agent\logs\customer-installer.log";
 const string rustDeskPermanentPassword = "abc123";
 
@@ -106,8 +107,11 @@ try
     using var roleReader = new StreamReader(roleEntry.Open());
     var role = roleReader.ReadToEnd().Trim();
     var isCustomer = string.Equals(role, "customer", StringComparison.OrdinalIgnoreCase);
-    var installRoot = isCustomer ? customerInstallRoot : staffInstallRoot;
+    var installRoot = Path.Combine(bootstrapRoot, isCustomer ? "customer" : "staff");
+    var finalInstallRoot = isCustomer ? customerInstallRoot : staffInstallRoot;
 
+    if (Directory.Exists(installRoot))
+        Directory.Delete(installRoot, true);
     Directory.CreateDirectory(installRoot);
     Log($"payload_extract_start install_root={installRoot}");
     foreach (var entry in archive.Entries)
@@ -147,18 +151,20 @@ try
             Log("customer_activation_ok");
         }
 
-        using var key = Microsoft.Win32.Registry.LocalMachine.CreateSubKey(
-            @"Software\Microsoft\Windows\CurrentVersion\Run");
-        key!.SetValue("RemoteInstallCustomerAgent", $"\"{agent}\"");
     }
 
-    StartChild(rustDesk, "rustdesk", installRoot);
+    InstallRustDesk(rustDesk, installRoot);
+    rustDesk = Path.Combine(finalInstallRoot, "rustdesk.exe");
+    if (!File.Exists(rustDesk))
+        throw new InvalidOperationException("RustDesk 原生安装未完成");
+    StartChild(rustDesk, "rustdesk", finalInstallRoot);
     Log($"rustdesk_started role={(isCustomer ? "customer" : "staff")}");
     if (isCustomer)
     {
-        SetRustDeskPassword(rustDesk, installRoot);
-        var agent = Path.Combine(installRoot, "customer-agent.exe");
-        StartChild(agent, "customer-agent", installRoot);
+        SetRustDeskPassword(rustDesk, finalInstallRoot);
+        var agent = Path.Combine(finalInstallRoot, "customer-agent.exe");
+        ConfigureCustomerAgentStartup(agent);
+        StartChild(agent, "customer-agent", finalInstallRoot);
         Log("customer_agent_started");
     }
     Console.WriteLine(isCustomer ? "远程安装客户端安装完成" : "远程安装客服端安装完成");
@@ -234,6 +240,38 @@ void StartChild(string executable, string name, string installRoot)
         throw new InvalidOperationException($"无法启动 {name}");
     Log($"child_process_started name={name} pid={process.Id}");
     process.Dispose();
+}
+
+void InstallRustDesk(string rustDesk, string installRoot)
+{
+    using var process = Process.Start(new ProcessStartInfo
+    {
+        FileName = rustDesk,
+        Arguments = "--silent-install",
+        WorkingDirectory = installRoot,
+        UseShellExecute = false,
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+        CreateNoWindow = true,
+    });
+    if (process is null)
+        throw new InvalidOperationException("无法启动 RustDesk 原生安装");
+    if (!process.WaitForExit(120000))
+    {
+        process.Kill(true);
+        throw new InvalidOperationException("RustDesk 原生安装超时");
+    }
+    var output = process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd();
+    if (process.ExitCode != 0)
+        throw new InvalidOperationException($"RustDesk 原生安装失败，退出码 {process.ExitCode}: {output.Trim()}");
+    Log("rustdesk_native_install_ok");
+}
+
+void ConfigureCustomerAgentStartup(string agent)
+{
+    using var key = Microsoft.Win32.Registry.LocalMachine.CreateSubKey(
+        @"Software\Microsoft\Windows\CurrentVersion\Run");
+    key!.SetValue("RemoteInstallCustomerAgent", $"\"{agent}\"");
 }
 
 void SetRustDeskPassword(string rustDesk, string installRoot)
