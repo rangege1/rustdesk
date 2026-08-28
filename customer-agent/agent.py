@@ -20,7 +20,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
-AGENT_VERSION = "0.2.3"
+AGENT_VERSION = "0.2.4"
 POLL_SECONDS = 3
 HEARTBEAT_SECONDS = 60
 RUNNERS = {"java", "python"}
@@ -113,7 +113,6 @@ class AgentConfig:
     api_base: str
     customer_id: int
     agent_token: str
-    installer_password: str = ""
 
 
 def load_config() -> AgentConfig:
@@ -133,14 +132,14 @@ def load_config() -> AgentConfig:
     if not customer_id or not agent_token:
         raise ValueError("请设置 customer_id 和 agent_token")
     LOGGER.info("config_loaded api_host=%s customer_id=%s config_path=%s", parsed.netloc, customer_id, CONFIG_FILE)
-    installer_password = str(raw.get("installer_password", os.environ.get("OPS_INSTALLER_PASSWORD", "")))
-    return AgentConfig(api_base, customer_id, agent_token, installer_password)
+    return AgentConfig(api_base, customer_id, agent_token)
 
 
 class CustomerAgent:
     def __init__(self, config: AgentConfig) -> None:
         self.config = config
         self.active_tasks: dict[int, Path] = {}
+        self.task_artifacts: dict[int, tuple[Path, Path, Path]] = {}
         self.last_task_status: dict[int, tuple[str, str]] = {}
         self.last_heartbeat = 0.0
         self.last_empty_poll_log = 0.0
@@ -197,6 +196,28 @@ class CustomerAgent:
     def report(self, task_id: int, status: str, log: str) -> None:
         LOGGER.info("task_status task_id=%s status=%s message=%s", task_id, status, log[:160].replace("\n", " "))
         self.request(f"/api/agent/tasks/{task_id}/status", "PATCH", {"status": status, "log": log})
+
+    def installer_password(self) -> str:
+        response = self.request(f"/api/agent/installer-password?customer_id={self.config.customer_id}")
+        password = str((response or {}).get("installer_password", ""))
+        if not password:
+            raise ValueError("服务器未配置安装密码")
+        return password
+
+    def cleanup_task_artifacts(self, task_id: int) -> None:
+        artifacts = self.task_artifacts.get(task_id)
+        if artifacts is None:
+            return
+        pending = False
+        for path in artifacts:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError as exc:
+                pending = True
+                LOGGER.warning("artifact_cleanup_retry task_id=%s path=%s error=%s", task_id, path, exc)
+        if not pending:
+            self.task_artifacts.pop(task_id, None)
+            LOGGER.info("artifact_cleanup_ok task_id=%s", task_id)
 
     def download_installer(self, runner: str) -> Path:
         if runner not in RUNNERS:
@@ -269,6 +290,7 @@ class CustomerAgent:
                 LOGGER.info("task_finished task_id=%s status=%s", task_id, task_status)
                 self.active_tasks.pop(task_id, None)
                 self.last_task_status.pop(task_id, None)
+                self.cleanup_task_artifacts(task_id)
                 continue
 
             process_id = status.get("pid")
@@ -278,6 +300,7 @@ class CustomerAgent:
                 LOGGER.error("installer_exited task_id=%s pid=%s", task_id, process_id)
                 self.active_tasks.pop(task_id, None)
                 self.last_task_status.pop(task_id, None)
+                self.cleanup_task_artifacts(task_id)
 
     @staticmethod
     def process_exists(process_id: int) -> bool:
@@ -312,12 +335,13 @@ class CustomerAgent:
                     "install_path": task["install_path"],
                     "download_path": task["download_path"],
                     "status_file": str(status_file),
-                    "installer_password": self.config.installer_password or "123321",
+                    "installer_password": self.installer_password(),
                 },
                 ensure_ascii=False,
             ),
             encoding="utf-8",
         )
+        self.task_artifacts[task_id] = (installer, task_file, status_file)
         self.launch_installer(installer, task_file)
         self.active_tasks[task_id] = status_file
         self.last_task_status.pop(task_id, None)
@@ -348,6 +372,9 @@ class CustomerAgent:
         self.report(task_id, "success", message)
 
     def run_once(self) -> None:
+        for task_id in list(self.task_artifacts):
+            if task_id not in self.active_tasks:
+                self.cleanup_task_artifacts(task_id)
         if time.monotonic() - self.last_heartbeat >= HEARTBEAT_SECONDS:
             self.heartbeat()
         self.update_active_tasks()

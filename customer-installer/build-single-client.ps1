@@ -4,7 +4,6 @@ param(
     [string]$AgentExe,
     [int]$CustomerId,
     [string]$AgentToken,
-    [string]$InstallerPassword = "123321",
     [string]$ApiBase = "https://rmm.itadl.com:8443",
     [string]$Output = "远程安装客户端.exe"
 )
@@ -39,7 +38,7 @@ try {
         Copy-Item $agent (Join-Path $payloadDir "customer-agent.exe") -Force
         Set-Content (Join-Path $payloadDir "agent-api-base.txt") $ApiBase.TrimEnd('/') -Encoding ASCII
         if ($CustomerId -and $AgentToken) {
-            $config = @{ api_base = $ApiBase.TrimEnd('/'); customer_id = $CustomerId; agent_token = $AgentToken; installer_password = $InstallerPassword } |
+            $config = @{ api_base = $ApiBase.TrimEnd('/'); customer_id = $CustomerId; agent_token = $AgentToken } |
                 ConvertTo-Json -Compress
             [IO.File]::WriteAllText((Join-Path $payloadDir "agent-config.json"), $config, [Text.UTF8Encoding]::new($false))
         }
