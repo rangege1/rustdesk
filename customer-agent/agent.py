@@ -20,7 +20,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
-AGENT_VERSION = "0.2.1"
+AGENT_VERSION = "0.2.2"
 POLL_SECONDS = 3
 HEARTBEAT_SECONDS = 60
 RUNNERS = {"java", "python"}
