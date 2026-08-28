@@ -20,7 +20,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
-AGENT_VERSION = "0.2.10"
+AGENT_VERSION = "0.2.11"
 POLL_SECONDS = 3
 HEARTBEAT_SECONDS = 60
 ARTIFACT_CLEANUP_INITIAL_DELAY_SECONDS = 15
@@ -210,6 +210,26 @@ class CustomerAgent:
             raise ValueError("服务器未配置安装密码")
         return password
 
+    @staticmethod
+    def installer_status_message(status: dict, message: str) -> str:
+        parts = [message] if message else []
+        install_path = str(status.get("actual_install_path", "")).strip()
+        if install_path and install_path not in message:
+            parts.append(f"实际安装路径：{install_path}")
+        results = status.get("results")
+        if isinstance(results, list):
+            completed = []
+            for result in results:
+                if not isinstance(result, dict):
+                    continue
+                software = str(result.get("software", "")).strip()
+                version = str(result.get("version", "")).strip()
+                if software:
+                    completed.append(f"{software} {version}".strip())
+            if completed:
+                parts.append(f"安装器确认：{', '.join(completed)}")
+        return "；".join(parts)[:10_000]
+
     def cleanup_task_artifacts(self, task_id: int) -> None:
         artifacts = self.task_artifacts.get(task_id)
         if artifacts is None:
@@ -389,7 +409,7 @@ class CustomerAgent:
             except (OSError, json.JSONDecodeError):
                 continue
             task_status = status.get("status")
-            message = str(status.get("message", ""))[:10_000]
+            message = self.installer_status_message(status, str(status.get("message", "")))
             if task_status in {"started", "running", "success", "failed", "cancelled"}:
                 current = (str(task_status), message)
                 if self.last_task_status.get(task_id) != current:
@@ -466,6 +486,7 @@ class CustomerAgent:
         task_file.write_text(
             json.dumps(
                 {
+                    "task_id": task_id,
                     "software": {name: versions.get(name) for name in software},
                     "install_path": task["install_path"],
                     "download_path": task["download_path"],

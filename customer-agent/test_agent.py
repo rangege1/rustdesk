@@ -61,6 +61,14 @@ class CustomerAgentTests(unittest.TestCase):
             report.assert_any_call(1, "running", "安装器已移交提权进程，正在等待安装完成并校验文件")
             self.assertIn(1, instance.active_tasks)
 
+    def test_installer_status_uses_reported_path_and_results(self):
+        status = {
+            "actual_install_path": r"C:\soft",
+            "results": [{"software": "jdk", "version": "1.8.0_241"}],
+        }
+        message = agent.CustomerAgent.installer_status_message(status, "全部安装项已完成")
+        self.assertEqual(message, "全部安装项已完成；实际安装路径：C:\\soft；安装器确认：jdk 1.8.0_241")
+
 
 if __name__ == "__main__":
     unittest.main()
