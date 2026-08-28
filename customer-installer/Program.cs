@@ -9,7 +9,7 @@ using System.Text;
 using System.Text.Json;
 using System.Windows.Forms;
 
-const string customerInstallRoot = @"C:\Program Files\RemoteInstallCustomer";
+const string customerInstallRoot = @"C:\Program Files\RemoteInstallClient";
 const string staffInstallRoot = @"C:\Program Files\RemoteInstallStaff";
 const string bootstrapRoot = @"C:\ProgramData\RemoteInstall\bootstrap";
 const string logFile = @"C:\ProgramData\RemoteInstall\agent\logs\customer-installer.log";
@@ -154,9 +154,10 @@ try
     }
 
     InstallRustDesk(rustDesk, installRoot);
+    CopyPayloadToFinal(installRoot, finalInstallRoot);
     rustDesk = Path.Combine(finalInstallRoot, "rustdesk.exe");
     if (!File.Exists(rustDesk))
-        throw new InvalidOperationException("RustDesk 原生安装未完成");
+        throw new InvalidOperationException($"RustDesk 运行文件未写入: {rustDesk}");
     StartChild(rustDesk, "rustdesk", finalInstallRoot);
     Log($"rustdesk_started role={(isCustomer ? "customer" : "staff")}");
     if (isCustomer)
@@ -265,6 +266,19 @@ void InstallRustDesk(string rustDesk, string installRoot)
     if (process.ExitCode != 0)
         throw new InvalidOperationException($"RustDesk 原生安装失败，退出码 {process.ExitCode}: {output.Trim()}");
     Log("rustdesk_native_install_ok");
+}
+
+void CopyPayloadToFinal(string sourceRoot, string destinationRoot)
+{
+    Directory.CreateDirectory(destinationRoot);
+    foreach (var source in Directory.EnumerateFiles(sourceRoot, "*", SearchOption.AllDirectories))
+    {
+        var relativePath = Path.GetRelativePath(sourceRoot, source);
+        var destination = Path.Combine(destinationRoot, relativePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        File.Copy(source, destination, true);
+    }
+    Log($"runtime_copy_ok install_root={destinationRoot}");
 }
 
 void ConfigureCustomerAgentStartup(string agent)
