@@ -20,7 +20,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
-AGENT_VERSION = "0.2.7"
+AGENT_VERSION = "0.2.8"
 POLL_SECONDS = 3
 HEARTBEAT_SECONDS = 60
 ARTIFACT_CLEANUP_INITIAL_DELAY_SECONDS = 15
@@ -238,63 +238,68 @@ class CustomerAgent:
 
     @staticmethod
     def installation_checks(task: dict) -> list[Path]:
-        install_path = CustomerAgent.resolve_install_path(str(task.get("install_path", "")))
+        install_paths = CustomerAgent.resolve_install_paths(str(task.get("install_path", "")))
         versions = task.get("versions", {})
         if not isinstance(versions, dict):
             return []
         checks: list[Path] = []
+
+        def check(relative_path: str) -> Path:
+            candidates = [path / relative_path for path in install_paths]
+            return next((path for path in candidates if path.is_file()), candidates[0])
+
         for software in task.get("software", []):
             version = str(versions.get(software, ""))
             if software == "jdk":
-                checks.append(install_path / f"jdk_{version}" / "bin" / "java.exe")
+                checks.append(check(f"jdk_{version}/bin/java.exe"))
             elif software == "node":
-                checks.append(install_path / f"node_{version}" / "node.exe")
+                checks.append(check(f"node_{version}/node.exe"))
             elif software == "idea":
-                checks.append(install_path / f"idea_{version}" / "bin" / "idea64.exe")
+                checks.append(check(f"idea_{version}/bin/idea64.exe"))
             elif software == "mysql":
-                checks.append(install_path / "mysql" / "bin" / "mysqld.exe")
+                checks.append(check("mysql/bin/mysqld.exe"))
             elif software == "eclipse":
-                checks.append(install_path / f"eclipse_{version}" / "eclipse.exe")
+                checks.append(check(f"eclipse_{version}/eclipse.exe"))
             elif software == "android":
-                checks.append(install_path / version)
+                checks.append(check(version))
             elif software == "navicat":
-                checks.append(install_path / f"navicat_{version}" / "navicat.exe")
+                checks.append(check(f"navicat_{version}/navicat.exe"))
             elif software == "tomcat":
-                checks.append(install_path / f"tomcat_{version}" / "bin" / "catalina.bat")
+                checks.append(check(f"tomcat_{version}/bin/catalina.bat"))
             elif software == "maven":
-                checks.append(install_path / f"maven_{version}" / "bin" / "mvn.cmd")
+                checks.append(check(f"maven_{version}/bin/mvn.cmd"))
             elif software == "workbench":
-                checks.append(install_path / f"mysql_{version}" / "MySQLWorkbench.exe")
+                checks.append(check(f"mysql_{version}/MySQLWorkbench.exe"))
             elif software == "phpstudy":
-                checks.append(install_path / f"phpstudy_{version}" / "COM" / "phpstudy_pro.exe")
+                checks.append(check(f"phpstudy_{version}/COM/phpstudy_pro.exe"))
             elif software == "pycharm":
-                checks.append(install_path / f"pycharm_{version}" / "bin" / "pycharm64.exe")
+                checks.append(check(f"pycharm_{version}/bin/pycharm64.exe"))
             elif software == "python":
-                checks.append(install_path / f"python_{version}" / "python.exe")
+                checks.append(check(f"python_{version}/python.exe"))
             elif software == "anaconda":
-                checks.append(install_path / "anaconda" / "Scripts" / "conda.exe")
+                checks.append(check("anaconda/Scripts/conda.exe"))
             elif software in {"pytorch", "tensorflow"}:
-                checks.append(install_path / "anaconda" / "envs" / version / "python.exe")
+                checks.append(check(f"anaconda/envs/{version}/python.exe"))
             elif software == "sqlserver":
-                checks.append(install_path / version)
+                checks.append(check(version))
         return checks
 
     @staticmethod
-    def resolve_install_path(value: str) -> Path:
-        """Mirror the installer's fallback when the requested drive is unavailable."""
+    def resolve_install_paths(value: str) -> list[Path]:
+        """Check the requested path and installer drive fallbacks for verification."""
         candidate = Path(value.strip())
+        paths: list[Path] = []
         if candidate.is_absolute() and candidate.drive:
-            requested_root = Path(candidate.drive + "\\")
-            if requested_root.exists():
-                return candidate
+            paths.append(candidate)
             suffix = candidate.relative_to(Path(candidate.anchor))
         else:
             suffix = candidate
         for drive in ("D:", "E:", "F:", "C:"):
             root = Path(drive + "\\")
             if root.exists():
-                return root / suffix
-        return Path(os.environ.get("PROGRAMDATA", str(Path.home()))) / "RemoteInstall" / suffix
+                paths.append(root / suffix)
+        paths.append(Path(os.environ.get("PROGRAMDATA", str(Path.home()))) / "RemoteInstall" / suffix)
+        return list(dict.fromkeys(paths))
 
     def download_installer(self, runner: str) -> Path:
         if runner not in RUNNERS:
