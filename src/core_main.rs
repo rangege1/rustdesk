@@ -463,6 +463,7 @@ pub fn core_main() -> Option<Vec<String>> {
                 if let Err(err) = crate::ipc::set_permanent_password(args[1].to_owned()) {
                     println!("{err}");
                 } else {
+                    crate::ipc::set_option("verification-method", "use-permanent-password");
                     println!("Done!");
                 }
             }

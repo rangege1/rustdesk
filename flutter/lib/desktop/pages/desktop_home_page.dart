@@ -139,8 +139,8 @@ class _DesktopHomePageState extends State<DesktopHomePage>
                     ),
                     const SizedBox(height: 12),
                     CustomerCredential(
-                      label: '临时密码',
-                      value: model.serverPasswd.text,
+                      label: '固定密码',
+                      value: 'abc123',
                       icon: Icons.key_outlined,
                     ),
                     const SizedBox(height: 14),
