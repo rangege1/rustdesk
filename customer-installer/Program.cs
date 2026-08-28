@@ -95,6 +95,7 @@ if (!IsAdministrator())
 
 try
 {
+    DisableCustomerAgentStartup();
     StopProcesses("rustdesk");
     StopProcesses("customer-agent");
 
@@ -204,8 +205,13 @@ void StopProcesses(string processName)
         }
     }
     Log($"processes_stopped name={processName} count={stopped}");
-    if (stopped > 0)
+    for (var attempt = 1; attempt <= 20; attempt++)
+    {
+        if (!Process.GetProcessesByName(processName).Any())
+            return;
         Thread.Sleep(500);
+    }
+    throw new InvalidOperationException($"无法停止 {processName}，请关闭占用程序后重试");
 }
 
 void ExtractWithRetry(ZipArchiveEntry entry, string target)
@@ -276,9 +282,37 @@ void CopyPayloadToFinal(string sourceRoot, string destinationRoot)
         var relativePath = Path.GetRelativePath(sourceRoot, source);
         var destination = Path.Combine(destinationRoot, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-        File.Copy(source, destination, true);
+        CopyFileWithRetry(source, destination, relativePath);
     }
     Log($"runtime_copy_ok install_root={destinationRoot}");
+}
+
+void CopyFileWithRetry(string source, string destination, string relativePath)
+{
+    Exception? lastError = null;
+    for (var attempt = 1; attempt <= 12; attempt++)
+    {
+        try
+        {
+            File.Copy(source, destination, true);
+            return;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            lastError = ex;
+            Log($"runtime_copy_retry file={relativePath} attempt={attempt} type={ex.GetType().Name}");
+            Thread.Sleep(500);
+        }
+    }
+    throw new IOException($"无法更新运行文件 {relativePath}，文件仍被占用或权限不足", lastError);
+}
+
+void DisableCustomerAgentStartup()
+{
+    using var key = Microsoft.Win32.Registry.LocalMachine.CreateSubKey(
+        @"Software\Microsoft\Windows\CurrentVersion\Run");
+    key!.DeleteValue("RemoteInstallCustomerAgent", false);
+    Log("customer_agent_startup_disabled");
 }
 
 void ConfigureCustomerAgentStartup(string agent)
