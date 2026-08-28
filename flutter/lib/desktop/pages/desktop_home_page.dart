@@ -145,14 +145,13 @@ class _DesktopHomePageState extends State<DesktopHomePage>
                     ),
                     const SizedBox(height: 14),
                     OutlinedButton.icon(
-                      onPressed: model.serverId.text.isEmpty ||
-                              model.serverPasswd.text.isEmpty
+                      onPressed: model.serverId.text.isEmpty
                           ? null
                           : () {
                               final message = [
                                 'RustDesk:',
                                 '设备代码:${model.serverId.text}',
-                                '密码:${model.serverPasswd.text}',
+                                '密码:abc123',
                               ].join('\n');
                               Clipboard.setData(ClipboardData(text: message));
                               showToast('设备信息已复制');
