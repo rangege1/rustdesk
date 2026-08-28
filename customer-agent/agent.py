@@ -20,9 +20,11 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
-AGENT_VERSION = "0.2.6"
+AGENT_VERSION = "0.2.7"
 POLL_SECONDS = 3
 HEARTBEAT_SECONDS = 60
+ARTIFACT_CLEANUP_INITIAL_DELAY_SECONDS = 15
+ARTIFACT_CLEANUP_MAX_DELAY_SECONDS = 300
 RUNNERS = {"java", "python"}
 RUSTDESK_ID_RE = re.compile(r"\d[\d\s-]{4,}\d")
 
@@ -141,6 +143,7 @@ class CustomerAgent:
         self.active_tasks: dict[int, Path] = {}
         self.task_artifacts: dict[int, tuple[Path, Path, Path]] = {}
         self.task_install_checks: dict[int, list[Path]] = {}
+        self.artifact_cleanup_retries: dict[int, tuple[int, float]] = {}
         self.last_task_status: dict[int, tuple[str, str]] = {}
         self.last_heartbeat = 0.0
         self.last_empty_poll_log = 0.0
@@ -209,20 +212,33 @@ class CustomerAgent:
         artifacts = self.task_artifacts.get(task_id)
         if artifacts is None:
             return
+        attempts, retry_at = self.artifact_cleanup_retries.get(task_id, (0, 0.0))
+        if time.monotonic() < retry_at:
+            return
         pending = False
         for path in artifacts:
             try:
                 path.unlink(missing_ok=True)
             except OSError as exc:
                 pending = True
-                LOGGER.warning("artifact_cleanup_retry task_id=%s path=%s error=%s", task_id, path, exc)
+                if attempts == 0:
+                    LOGGER.warning("artifact_cleanup_deferred task_id=%s path=%s error=%s", task_id, path, exc)
         if not pending:
             self.task_artifacts.pop(task_id, None)
+            self.artifact_cleanup_retries.pop(task_id, None)
             LOGGER.info("artifact_cleanup_ok task_id=%s", task_id)
+            return
+        attempts += 1
+        delay = min(
+            ARTIFACT_CLEANUP_INITIAL_DELAY_SECONDS * (2 ** min(attempts - 1, 5)),
+            ARTIFACT_CLEANUP_MAX_DELAY_SECONDS,
+        )
+        self.artifact_cleanup_retries[task_id] = (attempts, time.monotonic() + delay)
+        LOGGER.info("artifact_cleanup_scheduled task_id=%s retry_in_seconds=%s", task_id, delay)
 
     @staticmethod
     def installation_checks(task: dict) -> list[Path]:
-        install_path = Path(str(task.get("install_path", "")))
+        install_path = CustomerAgent.resolve_install_path(str(task.get("install_path", "")))
         versions = task.get("versions", {})
         if not isinstance(versions, dict):
             return []
@@ -262,6 +278,23 @@ class CustomerAgent:
             elif software == "sqlserver":
                 checks.append(install_path / version)
         return checks
+
+    @staticmethod
+    def resolve_install_path(value: str) -> Path:
+        """Mirror the installer's fallback when the requested drive is unavailable."""
+        candidate = Path(value.strip())
+        if candidate.is_absolute() and candidate.drive:
+            requested_root = Path(candidate.drive + "\\")
+            if requested_root.exists():
+                return candidate
+            suffix = candidate.relative_to(Path(candidate.anchor))
+        else:
+            suffix = candidate
+        for drive in ("D:", "E:", "F:", "C:"):
+            root = Path(drive + "\\")
+            if root.exists():
+                return root / suffix
+        return Path(os.environ.get("PROGRAMDATA", str(Path.home()))) / "RemoteInstall" / suffix
 
     def download_installer(self, runner: str) -> Path:
         if runner not in RUNNERS:
