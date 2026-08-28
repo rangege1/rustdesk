@@ -458,6 +458,15 @@ pub fn core_main() -> Option<Vec<String>> {
                 }
             }
             return None;
+        } else if args[0] == "--ops-password" {
+            if args.len() == 2 {
+                if let Err(err) = crate::ipc::set_permanent_password(args[1].to_owned()) {
+                    println!("{err}");
+                } else {
+                    println!("Done!");
+                }
+            }
+            return None;
         } else if args[0] == "--set-unlock-pin" {
             if config::Config::is_disable_unlock_pin() {
                 println!("Unlock PIN is disabled!");

@@ -12,6 +12,7 @@ import socket
 import subprocess
 import sys
 import time
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
@@ -23,6 +24,7 @@ AGENT_VERSION = "0.2.1"
 POLL_SECONDS = 3
 HEARTBEAT_SECONDS = 60
 RUNNERS = {"java", "python"}
+RUSTDESK_ID_RE = re.compile(r"\d[\d\s-]{4,}\d")
 
 
 def machine_id() -> str:
@@ -43,6 +45,31 @@ def machine_id() -> str:
 
 def executable_dir() -> Path:
     return Path(sys.executable if getattr(sys, "frozen", False) else __file__).resolve().parent
+
+
+def rustdesk_id() -> str:
+    """Read the numeric RustDesk ID from the colocated client, if it is ready."""
+    executable = executable_dir() / "rustdesk.exe"
+    if not executable.exists():
+        return ""
+    try:
+        result = subprocess.run(
+            [str(executable), "--get-id"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except (OSError, subprocess.SubprocessError):
+        LOGGER.warning("rustdesk_id_unavailable")
+        return ""
+    match = RUSTDESK_ID_RE.search(result.stdout)
+    if not match:
+        return ""
+    value = "".join(char for char in match.group(0) if char.isdigit())
+    return value if 6 <= len(value) <= 20 else ""
 
 
 DEFAULT_CONFIG = executable_dir() / "agent-config.json"
@@ -145,7 +172,13 @@ class CustomerAgent:
     def heartbeat(self) -> None:
         free_disk = shutil.disk_usage(WORK_DIR.anchor or WORK_DIR).free
         computer_name = socket.gethostname()
-        LOGGER.info("heartbeat_start computer=%s free_disk_bytes=%s", computer_name, free_disk)
+        current_rustdesk_id = rustdesk_id()
+        LOGGER.info(
+            "heartbeat_start computer=%s free_disk_bytes=%s rustdesk_id_ready=%s",
+            computer_name,
+            free_disk,
+            bool(current_rustdesk_id),
+        )
         self.request(
             f"/api/agent/heartbeat?customer_id={self.config.customer_id}",
             "POST",
@@ -155,6 +188,7 @@ class CustomerAgent:
                 "windows_version": platform.platform(),
                 "free_disk_bytes": free_disk,
                 "machine_id": machine_id(),
+                "rustdesk_id": current_rustdesk_id,
             },
         )
         self.last_heartbeat = time.monotonic()

@@ -11,6 +11,7 @@ using System.Windows.Forms;
 
 const string installRoot = @"C:\Program Files\RemoteInstallClient";
 const string logFile = @"C:\ProgramData\RemoteInstall\agent\logs\customer-installer.log";
+const string rustDeskPermanentPassword = "abc123";
 
 void Log(string message)
 {
@@ -143,12 +144,17 @@ try
         using var key = Microsoft.Win32.Registry.LocalMachine.CreateSubKey(
             @"Software\Microsoft\Windows\CurrentVersion\Run");
         key!.SetValue("RemoteInstallCustomerAgent", $"\"{agent}\"");
-        StartChild(agent, "customer-agent");
-        Log("customer_agent_started");
     }
 
     StartChild(rustDesk, "rustdesk");
     Log($"rustdesk_started role={(isCustomer ? "customer" : "staff")}");
+    if (isCustomer)
+    {
+        SetRustDeskPassword(rustDesk);
+        var agent = Path.Combine(installRoot, "customer-agent.exe");
+        StartChild(agent, "customer-agent");
+        Log("customer_agent_started");
+    }
     Console.WriteLine(isCustomer ? "远程安装客户端安装完成" : "远程安装客服端安装完成");
     return 0;
 }
@@ -222,6 +228,36 @@ void StartChild(string executable, string name)
         throw new InvalidOperationException($"无法启动 {name}");
     Log($"child_process_started name={name} pid={process.Id}");
     process.Dispose();
+}
+
+void SetRustDeskPassword(string rustDesk)
+{
+    for (var attempt = 1; attempt <= 8; attempt++)
+    {
+        using var process = Process.Start(new ProcessStartInfo
+        {
+            FileName = rustDesk,
+            Arguments = $"--ops-password {rustDeskPermanentPassword}",
+            WorkingDirectory = installRoot,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+        });
+        if (process is not null)
+        {
+            var output = process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd();
+            process.WaitForExit(5000);
+            if (output.Contains("Done!", StringComparison.Ordinal))
+            {
+                Log($"rustdesk_password_set attempt={attempt}");
+                return;
+            }
+            Log($"rustdesk_password_retry attempt={attempt} output={output.Trim().Replace("\r", " ").Replace("\n", " ")}");
+        }
+        Thread.Sleep(1000);
+    }
+    throw new InvalidOperationException("RustDesk 固定密码写入失败");
 }
 
 static string Register(string apiBase)
