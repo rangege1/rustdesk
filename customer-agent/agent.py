@@ -20,7 +20,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
-AGENT_VERSION = "0.2.4"
+AGENT_VERSION = "0.2.5"
 POLL_SECONDS = 3
 HEARTBEAT_SECONDS = 60
 RUNNERS = {"java", "python"}
@@ -140,6 +140,7 @@ class CustomerAgent:
         self.config = config
         self.active_tasks: dict[int, Path] = {}
         self.task_artifacts: dict[int, tuple[Path, Path, Path]] = {}
+        self.task_install_checks: dict[int, list[Path]] = {}
         self.last_task_status: dict[int, tuple[str, str]] = {}
         self.last_heartbeat = 0.0
         self.last_empty_poll_log = 0.0
@@ -219,6 +220,25 @@ class CustomerAgent:
             self.task_artifacts.pop(task_id, None)
             LOGGER.info("artifact_cleanup_ok task_id=%s", task_id)
 
+    @staticmethod
+    def installation_checks(task: dict) -> list[Path]:
+        install_path = Path(str(task.get("install_path", "")))
+        versions = task.get("versions", {})
+        if not isinstance(versions, dict):
+            return []
+        checks: list[Path] = []
+        for software in task.get("software", []):
+            version = str(versions.get(software, ""))
+            if software == "jdk":
+                checks.append(install_path / f"jdk_{version}" / "bin" / "java.exe")
+            elif software == "node":
+                checks.append(install_path / f"node_{version}" / "node.exe")
+            elif software == "idea":
+                checks.append(install_path / f"idea_{version}" / "bin" / "idea64.exe")
+            elif software == "mysql":
+                checks.append(install_path / "mysql" / "bin" / "mysqld.exe")
+        return checks
+
     def download_installer(self, runner: str) -> Path:
         if runner not in RUNNERS:
             raise ValueError(f"不允许的安装器类型: {runner}")
@@ -290,14 +310,24 @@ class CustomerAgent:
                 LOGGER.info("task_finished task_id=%s status=%s", task_id, task_status)
                 self.active_tasks.pop(task_id, None)
                 self.last_task_status.pop(task_id, None)
+                self.task_install_checks.pop(task_id, None)
                 self.cleanup_task_artifacts(task_id)
                 continue
 
             process_id = status.get("pid")
             if process_id and not self.process_exists(int(process_id)):
-                message = "安装器进程已退出，任务未完成"
-                self.report(task_id, "failed", message)
-                LOGGER.error("installer_exited task_id=%s pid=%s", task_id, process_id)
+                checks = self.task_install_checks.pop(task_id, [])
+                missing = [str(path) for path in checks if not path.is_file()]
+                if checks and not missing:
+                    message = "安装器已退出，已校验所有软件文件存在"
+                    self.report(task_id, "success", message)
+                    LOGGER.info("installer_exit_verified task_id=%s pid=%s", task_id, process_id)
+                else:
+                    message = "安装器进程已退出，未检测到完成状态"
+                    if missing:
+                        message += f"；缺少：{'；'.join(missing)}"
+                    self.report(task_id, "failed", message)
+                    LOGGER.error("installer_exited task_id=%s pid=%s missing=%s", task_id, process_id, missing)
                 self.active_tasks.pop(task_id, None)
                 self.last_task_status.pop(task_id, None)
                 self.cleanup_task_artifacts(task_id)
@@ -342,6 +372,7 @@ class CustomerAgent:
             encoding="utf-8",
         )
         self.task_artifacts[task_id] = (installer, task_file, status_file)
+        self.task_install_checks[task_id] = self.installation_checks(task)
         self.launch_installer(installer, task_file)
         self.active_tasks[task_id] = status_file
         self.last_task_status.pop(task_id, None)
