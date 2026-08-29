@@ -69,6 +69,19 @@ class CustomerAgentTests(unittest.TestCase):
         message = agent.CustomerAgent.installer_status_message(status, "全部安装项已完成")
         self.assertEqual(message, "全部安装项已完成；实际安装路径：C:\\soft；安装器确认：jdk 1.8.0_241")
 
+    def test_cancelled_task_stops_active_installer(self):
+        with tempfile.TemporaryDirectory() as directory:
+            status_file = Path(directory) / "task.json"
+            status_file.write_text(json.dumps({"status": "running", "pid": 1234}), encoding="utf-8")
+            instance = agent.CustomerAgent(agent.AgentConfig("https://example.test", 1, "token"))
+            instance.active_tasks[1] = status_file
+            instance.task_artifacts[1] = (Path(directory) / "javaMain.exe", Path(directory) / "request.json", status_file)
+            with patch.object(instance, "request", return_value={"cancelled": True}), patch.object(instance, "report") as report, patch.object(instance, "stop_installer_process") as stop, patch.object(instance, "cleanup_task_artifacts") as cleanup:
+                instance.update_active_tasks()
+            stop.assert_called_once_with(1234)
+            report.assert_called_once_with(1, "cancelled", "运营人员已取消任务，安装器已关闭")
+            cleanup.assert_called_once_with(1)
+
     def test_cleanup_fails_when_no_installed_directory_is_deleted(self):
         instance = agent.CustomerAgent(agent.AgentConfig("https://example.test", 1, "token"))
         target = {"path": r"C:\\missing\\maven_3.8.1", "root": r"C:\\missing", "kind": "install", "label": "Maven 3.8.1"}

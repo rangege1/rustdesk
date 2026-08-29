@@ -20,7 +20,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
-AGENT_VERSION = "0.2.13"
+AGENT_VERSION = "0.2.14"
 POLL_SECONDS = 3
 HEARTBEAT_SECONDS = 60
 ARTIFACT_CLEANUP_INITIAL_DELAY_SECONDS = 15
@@ -407,6 +407,25 @@ class CustomerAgent:
 
     def update_active_tasks(self) -> None:
         for task_id, status_file in list(self.active_tasks.items()):
+            try:
+                cancelled = self.request(f"/api/agent/tasks/{task_id}/cancelled?customer_id={self.config.customer_id}").get("cancelled", False)
+            except Exception as exc:
+                LOGGER.warning("task_cancel_check_failed task_id=%s error=%s", task_id, exc)
+                cancelled = False
+            if cancelled:
+                try:
+                    status = json.loads(status_file.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    status = {}
+                self.stop_installer_process(status.get("pid"))
+                self.report(task_id, "cancelled", "运营人员已取消任务，安装器已关闭")
+                self.active_tasks.pop(task_id, None)
+                self.last_task_status.pop(task_id, None)
+                self.task_install_checks.pop(task_id, None)
+                self.active_task_started_at.pop(task_id, None)
+                self.cleanup_task_artifacts(task_id)
+                LOGGER.info("task_cancelled_by_admin task_id=%s", task_id)
+                continue
             try:
                 status = json.loads(status_file.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
