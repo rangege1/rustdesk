@@ -69,6 +69,15 @@ class CustomerAgentTests(unittest.TestCase):
         message = agent.CustomerAgent.installer_status_message(status, "全部安装项已完成")
         self.assertEqual(message, "全部安装项已完成；实际安装路径：C:\\soft；安装器确认：jdk 1.8.0_241")
 
+    def test_cleanup_fails_when_no_installed_directory_is_deleted(self):
+        instance = agent.CustomerAgent(agent.AgentConfig("https://example.test", 1, "token"))
+        target = {"path": r"C:\\missing\\maven_3.8.1", "root": r"C:\\missing", "kind": "install", "label": "Maven 3.8.1"}
+        with patch.object(instance, "report") as report:
+            instance.cleanup_task(7, [target])
+        self.assertEqual(report.call_count, 2)
+        self.assertEqual(report.call_args_list[-1].args[1], "failed")
+        self.assertIn("Maven 3.8.1", report.call_args_list[-1].args[2])
+
 
 if __name__ == "__main__":
     unittest.main()

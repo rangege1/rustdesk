@@ -20,7 +20,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
-AGENT_VERSION = "0.2.11"
+AGENT_VERSION = "0.2.12"
 POLL_SECONDS = 3
 HEARTBEAT_SECONDS = 60
 ARTIFACT_CLEANUP_INITIAL_DELAY_SECONDS = 15
@@ -199,9 +199,12 @@ class CustomerAgent:
         self.last_heartbeat = time.monotonic()
         LOGGER.info("heartbeat_ok")
 
-    def report(self, task_id: int, status: str, log: str) -> None:
+    def report(self, task_id: int, status: str, log: str, actual_install_path: str = "") -> None:
         LOGGER.info("task_status task_id=%s status=%s message=%s", task_id, status, log[:160].replace("\n", " "))
-        self.request(f"/api/agent/tasks/{task_id}/status", "PATCH", {"status": status, "log": log})
+        payload = {"status": status, "log": log}
+        if actual_install_path:
+            payload["actual_install_path"] = actual_install_path
+        self.request(f"/api/agent/tasks/{task_id}/status", "PATCH", payload)
 
     def installer_password(self) -> str:
         response = self.request(f"/api/agent/installer-password?customer_id={self.config.customer_id}")
@@ -410,10 +413,11 @@ class CustomerAgent:
                 continue
             task_status = status.get("status")
             message = self.installer_status_message(status, str(status.get("message", "")))
+            actual_install_path = str(status.get("actual_install_path", "")).strip()
             if task_status in {"started", "running", "success", "failed", "cancelled"}:
                 current = (str(task_status), message)
                 if self.last_task_status.get(task_id) != current:
-                    self.report(task_id, task_status, message or "安装器状态已更新")
+                    self.report(task_id, task_status, message or "安装器状态已更新", actual_install_path)
                     self.last_task_status[task_id] = current
             if task_status in {"success", "failed", "cancelled"}:
                 LOGGER.info("task_finished task_id=%s status=%s", task_id, task_status)
@@ -511,6 +515,8 @@ class CustomerAgent:
             raise ValueError("退款清理目标格式无效")
         self.report(task_id, "running", "正在永久删除后台记录的软件文件")
         removed: list[str] = []
+        missing: list[str] = []
+        failed: list[str] = []
         for target in targets:
             if not isinstance(target, dict):
                 raise ValueError("退款清理目标格式无效")
@@ -518,16 +524,34 @@ class CustomerAgent:
             root = Path(str(target.get("root", ""))).resolve()
             if path == root or root not in path.parents:
                 raise ValueError(f"拒绝删除非受控路径: {path}")
+            label = str(target.get("label", target.get("software", path.name))).strip()
+            kind = str(target.get("kind", "install"))
             if not path.exists():
+                if kind == "install":
+                    missing.append(f"{label}（{path}）")
                 continue
-            if path.is_dir():
-                shutil.rmtree(path)
-            else:
-                path.unlink()
-            removed.append(str(path))
+            try:
+                if path.is_dir():
+                    shutil.rmtree(path)
+                else:
+                    path.unlink()
+                if path.exists():
+                    raise OSError("删除后路径仍存在")
+            except OSError as exc:
+                failed.append(f"{label}（{path}）：{exc}")
+                LOGGER.warning("cleanup_failed task_id=%s path=%s error=%s", task_id, path, exc)
+                continue
+            if kind == "install":
+                removed.append(f"{label}（{path}）")
             LOGGER.info("cleanup_removed task_id=%s path=%s", task_id, path)
-        message = "退款清理完成" if not removed else f"退款清理完成，已永久删除 {len(removed)} 项"
-        self.report(task_id, "success", message)
+        if failed:
+            self.report(task_id, "failed", f"退款清理失败：{'；'.join(failed)}")
+        elif not removed:
+            detail = "；".join(missing) or "未发现可删除的软件目录"
+            self.report(task_id, "failed", f"退款清理未执行：{detail}")
+        else:
+            detail = "；".join(removed)
+            self.report(task_id, "success", f"退款清理完成，已永久删除：{detail}")
 
     def run_once(self) -> None:
         for task_id in list(self.task_artifacts):
