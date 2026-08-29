@@ -19,7 +19,7 @@ class CustomerAgentTests(unittest.TestCase):
         with patch.object(agent.os, "kill", side_effect=PermissionError):
             self.assertTrue(agent.CustomerAgent.process_exists(1234))
 
-    def test_success_stops_installer_before_artifact_cleanup(self):
+    def test_success_keeps_installer_alive_until_it_closes_itself(self):
         with tempfile.TemporaryDirectory() as directory:
             status_file = Path(directory) / "task.json"
             status_file.write_text(json.dumps({"status": "success", "message": "done", "pid": 1234}), encoding="utf-8")
@@ -28,7 +28,7 @@ class CustomerAgentTests(unittest.TestCase):
             instance.task_artifacts[1] = (Path(directory) / "javaMain.exe", Path(directory) / "request.json", status_file)
             with patch.object(instance, "report"), patch.object(instance, "stop_installer_process") as stop, patch.object(instance, "cleanup_task_artifacts") as cleanup:
                 instance.update_active_tasks()
-            stop.assert_called_once_with(1234)
+            stop.assert_not_called()
             cleanup.assert_called_once_with(1)
 
     def test_installer_exit_rechecks_all_install_paths_before_marking_success(self):
@@ -77,6 +77,28 @@ class CustomerAgentTests(unittest.TestCase):
         self.assertEqual(report.call_count, 2)
         self.assertEqual(report.call_args_list[-1].args[1], "failed")
         self.assertIn("Maven 3.8.1", report.call_args_list[-1].args[2])
+
+    def test_cleanup_removes_download_cache_and_runtime_with_installation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            install = root / "maven_3.8.1"
+            cache = root / "package"
+            runtime = root / "jre_1.8.0_241"
+            for path in (install, cache, runtime):
+                path.mkdir()
+            instance = agent.CustomerAgent(agent.AgentConfig("https://example.test", 1, "token"))
+            targets = [
+                {"path": str(install), "root": str(root), "kind": "install", "label": "Maven 3.8.1"},
+                {"path": str(cache), "root": str(root), "kind": "download-cache", "label": "下载缓存目录"},
+                {"path": str(runtime), "root": str(root), "kind": "runtime", "label": "Java 运行环境 1.8.0_241"},
+            ]
+            with patch.object(instance, "report") as report:
+                instance.cleanup_task(7, targets)
+            self.assertFalse(install.exists())
+            self.assertFalse(cache.exists())
+            self.assertFalse(runtime.exists())
+            self.assertEqual(report.call_args_list[-1].args[1], "success")
+            self.assertIn("下载缓存目录", report.call_args_list[-1].args[2])
 
 
 if __name__ == "__main__":

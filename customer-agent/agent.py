@@ -20,7 +20,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
-AGENT_VERSION = "0.2.12"
+AGENT_VERSION = "0.2.13"
 POLL_SECONDS = 3
 HEARTBEAT_SECONDS = 60
 ARTIFACT_CLEANUP_INITIAL_DELAY_SECONDS = 15
@@ -421,8 +421,6 @@ class CustomerAgent:
                     self.last_task_status[task_id] = current
             if task_status in {"success", "failed", "cancelled"}:
                 LOGGER.info("task_finished task_id=%s status=%s", task_id, task_status)
-                if task_status == "success":
-                    self.stop_installer_process(status.get("pid"))
                 self.active_tasks.pop(task_id, None)
                 self.last_task_status.pop(task_id, None)
                 self.task_install_checks.pop(task_id, None)
@@ -515,6 +513,7 @@ class CustomerAgent:
             raise ValueError("退款清理目标格式无效")
         self.report(task_id, "running", "正在永久删除后台记录的软件文件")
         removed: list[str] = []
+        removed_installs: list[str] = []
         missing: list[str] = []
         failed: list[str] = []
         for target in targets:
@@ -522,10 +521,11 @@ class CustomerAgent:
                 raise ValueError("退款清理目标格式无效")
             path = Path(str(target.get("path", ""))).resolve()
             root = Path(str(target.get("root", ""))).resolve()
-            if path == root or root not in path.parents:
+            kind = str(target.get("kind", "install"))
+            is_download_cache = kind == "download-cache"
+            if (path == root and not is_download_cache) or (path != root and root not in path.parents):
                 raise ValueError(f"拒绝删除非受控路径: {path}")
             label = str(target.get("label", target.get("software", path.name))).strip()
-            kind = str(target.get("kind", "install"))
             if not path.exists():
                 if kind == "install":
                     missing.append(f"{label}（{path}）")
@@ -541,12 +541,13 @@ class CustomerAgent:
                 failed.append(f"{label}（{path}）：{exc}")
                 LOGGER.warning("cleanup_failed task_id=%s path=%s error=%s", task_id, path, exc)
                 continue
+            removed.append(f"{label}（{path}）")
             if kind == "install":
-                removed.append(f"{label}（{path}）")
+                removed_installs.append(f"{label}（{path}）")
             LOGGER.info("cleanup_removed task_id=%s path=%s", task_id, path)
         if failed:
             self.report(task_id, "failed", f"退款清理失败：{'；'.join(failed)}")
-        elif not removed:
+        elif not removed_installs:
             detail = "；".join(missing) or "未发现可删除的软件目录"
             self.report(task_id, "failed", f"退款清理未执行：{detail}")
         else:
