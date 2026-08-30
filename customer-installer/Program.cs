@@ -7,13 +7,17 @@ using System.Security.Principal;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using System.Windows.Forms;
 
 const string customerInstallRoot = @"C:\Program Files\RemoteInstallClient";
 const string staffInstallRoot = @"C:\Program Files\RemoteInstallStaff";
 const string bootstrapRoot = @"C:\ProgramData\RemoteInstall\bootstrap";
 const string logFile = @"C:\ProgramData\RemoteInstall\agent\logs\customer-installer.log";
 const string rustDeskPermanentPassword = "abc123";
+const uint mbOk = 0;
+const uint mbIconError = 0x10;
+
+[DllImport("user32.dll", CharSet = CharSet.Unicode)]
+static extern int MessageBoxW(IntPtr hWnd, string text, string caption, uint type);
 
 void Log(string message)
 {
@@ -38,21 +42,10 @@ void ShowError(string message)
 {
     try
     {
-        MessageBox.Show(
-            $"{message}\n\n详细日志：{logFile}",
-            "远程安装客户端",
-            MessageBoxButtons.OK,
-            MessageBoxIcon.Error);
+        MessageBoxW(IntPtr.Zero, $"{message}\n\n详细日志：{logFile}", "远程安装客户端", mbOk | mbIconError);
     }
     catch { }
 }
-
-Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
-Application.ThreadException += (_, args) =>
-{
-    Log($"ui_exception type={args.Exception.GetType().Name} message={args.Exception.Message}");
-    ShowError($"客户端启动失败：{args.Exception.Message}");
-};
 
 AppDomain.CurrentDomain.UnhandledException += (_, args) =>
     Log($"unhandled_exception terminating={args.IsTerminating} detail={args.ExceptionObject}");
@@ -95,10 +88,6 @@ if (!IsAdministrator())
 
 try
 {
-    DisableCustomerAgentStartup();
-    StopProcesses("rustdesk");
-    StopProcesses("customer-agent");
-
     var payload = Assembly.GetExecutingAssembly().GetManifestResourceStream("payload.zip")
         ?? throw new InvalidOperationException("安装包载荷缺失");
     using var archive = new ZipArchive(payload, ZipArchiveMode.Read);
@@ -110,6 +99,18 @@ try
     var isCustomer = string.Equals(role, "customer", StringComparison.OrdinalIgnoreCase);
     var installRoot = Path.Combine(bootstrapRoot, isCustomer ? "customer" : "staff");
     var finalInstallRoot = isCustomer ? customerInstallRoot : staffInstallRoot;
+
+    StopProcesses("rustdesk");
+    if (isCustomer)
+    {
+        DisableCustomerAgentStartup();
+        StopProcesses("customer-agent");
+    }
+    else
+    {
+        DisableStaffWorkerStartup();
+        StopProcesses("rustdesk-worker");
+    }
 
     if (Directory.Exists(installRoot))
         Directory.Delete(installRoot, true);
@@ -153,6 +154,13 @@ try
         }
 
     }
+    else
+    {
+        var worker = Path.Combine(installRoot, "rustdesk-worker.exe");
+        var workerConfig = Path.Combine(installRoot, "worker-config.json");
+        if (!File.Exists(worker) || !File.Exists(workerConfig))
+            throw new InvalidOperationException("安装包不完整，缺少客服 Worker 或配置文件");
+    }
 
     InstallRustDesk(rustDesk, installRoot);
     CopyPayloadToFinal(installRoot, finalInstallRoot);
@@ -168,6 +176,13 @@ try
         ConfigureCustomerAgentStartup(agent);
         StartChild(agent, "customer-agent", finalInstallRoot);
         Log("customer_agent_started");
+    }
+    else
+    {
+        var worker = Path.Combine(finalInstallRoot, "rustdesk-worker.exe");
+        ConfigureStaffWorkerStartup(worker);
+        StartChild(worker, "rustdesk-worker", finalInstallRoot);
+        Log("staff_worker_started");
     }
     Console.WriteLine(isCustomer ? "远程安装客户端安装完成" : "远程安装客服端安装完成");
     return 0;
@@ -322,6 +337,21 @@ void ConfigureCustomerAgentStartup(string agent)
     key!.SetValue("RemoteInstallCustomerAgent", $"\"{agent}\"");
 }
 
+void DisableStaffWorkerStartup()
+{
+    using var key = Microsoft.Win32.Registry.LocalMachine.CreateSubKey(
+        @"Software\Microsoft\Windows\CurrentVersion\Run");
+    key!.DeleteValue("RemoteInstallStaffWorker", false);
+    Log("staff_worker_startup_disabled");
+}
+
+void ConfigureStaffWorkerStartup(string worker)
+{
+    using var key = Microsoft.Win32.Registry.LocalMachine.CreateSubKey(
+        @"Software\Microsoft\Windows\CurrentVersion\Run");
+    key!.SetValue("RemoteInstallStaffWorker", $"\"{worker}\"");
+}
+
 void SetRustDeskPassword(string rustDesk, string installRoot)
 {
     for (var attempt = 1; attempt <= 8; attempt++)
@@ -379,7 +409,7 @@ static string Register(string apiBase)
     }
     catch (Exception ex)
     {
-        MessageBox.Show($"设备注册失败：{ex.Message}", "远程安装服务", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        MessageBoxW(IntPtr.Zero, $"设备注册失败：{ex.Message}", "远程安装服务", mbOk | mbIconError);
         throw new InvalidOperationException("设备注册失败");
     }
 }

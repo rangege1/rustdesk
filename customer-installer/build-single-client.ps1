@@ -2,6 +2,8 @@ param(
     [Parameter(Mandatory = $true)][string]$RustDeskDir,
     [ValidateSet("customer", "staff")][string]$Role = "customer",
     [string]$AgentExe,
+    [string]$WorkerExe,
+    [string]$WorkerToken,
     [int]$CustomerId,
     [string]$AgentToken,
     [string]$ApiBase = "https://rmm.itadl.com:8443",
@@ -16,6 +18,12 @@ if ($Role -eq "customer") {
         throw "客户版需要 AgentExe"
     }
     $agent = (Resolve-Path $AgentExe).Path
+}
+else {
+    if (-not $WorkerExe -or -not $WorkerToken) {
+        throw "客服版需要 WorkerExe 和 WorkerToken"
+    }
+    $worker = (Resolve-Path $WorkerExe).Path
 }
 $stage = Join-Path $env:TEMP "remote-install-client-$([guid]::NewGuid())"
 $payloadDir = Join-Path $stage "payload"
@@ -43,12 +51,22 @@ try {
             [IO.File]::WriteAllText((Join-Path $payloadDir "agent-config.json"), $config, [Text.UTF8Encoding]::new($false))
         }
     }
+    else {
+        Copy-Item $worker (Join-Path $payloadDir "rustdesk-worker.exe") -Force
+        $workerConfig = @{
+            api_base = $ApiBase.TrimEnd('/');
+            worker_token = $WorkerToken;
+            rustdesk_exe = "C:\Program Files\RemoteInstallStaff\rustdesk.exe";
+            rustdesk_connect_flag = "--ops-connect"
+        } | ConvertTo-Json -Compress
+        [IO.File]::WriteAllText((Join-Path $payloadDir "worker-config.json"), $workerConfig, [Text.UTF8Encoding]::new($false))
+    }
 
     $zip = Join-Path $root "payload.zip"
     if (Test-Path $zip) { Remove-Item $zip -Force }
     Compress-Archive -Path (Join-Path $payloadDir "*") -DestinationPath $zip -CompressionLevel Optimal
     dotnet publish (Join-Path $root "customer-installer.csproj") -c Release -r win-x64 --self-contained true `
-        /p:PublishSingleFile=true /p:IncludeNativeLibrariesForSelfExtract=true -o $publishDir
+        /p:PublishAot=false /p:PublishSingleFile=true /p:IncludeNativeLibrariesForSelfExtract=true -o $publishDir
     $exe = Get-ChildItem -Path $publishDir -Filter *.exe -File | Select-Object -First 1
     if (-not $exe) { throw "单文件客户端没有生成" }
     $outputPath = if ([IO.Path]::IsPathRooted($Output)) { $Output } else { Join-Path (Get-Location) $Output }
