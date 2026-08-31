@@ -194,13 +194,14 @@ def connection_error_open() -> bool:
     return bool(connection_error_detail())
 
 
-def connect_rustdesk(rustdesk_id: str, password: str, on_started, should_cancel) -> bool | None:
+def connect_rustdesk(rustdesk_id: str, password: str, on_started, should_cancel, mode: str = "remote") -> bool | None:
     close_dashboard_windows()
     executable = find_rustdesk()
     if Path(executable).name.lower().startswith("remote-install-"):
         raise RuntimeError("RUSTDESK_EXE 指向了安装启动器，请改为安装目录中的 rustdesk.exe")
-    log(f"connect_start id={rustdesk_id} executable={executable} flag={CONNECT_FLAG}")
-    process = subprocess.Popen([executable, CONNECT_FLAG, rustdesk_id, "--password", password], close_fds=True)
+    connect_flag = "--file-transfer" if mode == "file_transfer" else CONNECT_FLAG
+    log(f"connect_start id={rustdesk_id} executable={executable} flag={connect_flag}")
+    process = subprocess.Popen([executable, connect_flag, rustdesk_id, "--password", password], close_fds=True)
     on_started()
     deadline = time.monotonic() + CONNECT_TIMEOUT_SECONDS
     next_cancel_check = 0.0
@@ -255,13 +256,15 @@ def run_once() -> None:
     connection = request("/api/worker/connection-tasks")
     if not connection:
         return
-    log(f"task_received task_id={connection['id']} customer_id={connection['customer_id']}")
+    mode = connection.get("mode", "remote")
+    action = "文件传输" if mode == "file_transfer" else "远程连接"
+    log(f"task_received task_id={connection['id']} customer_id={connection['customer_id']} mode={mode}")
     try:
         def mark_rustdesk_started() -> None:
             request(
                 f"/api/worker/connection-tasks/{connection['id']}",
                 "PATCH",
-                {"status": "running", "phase": "rustdesk_started", "log": "RustDesk 已启动，正在建立远程会话"},
+                {"status": "running", "phase": "rustdesk_started", "log": f"RustDesk 已启动，正在建立{action}会话"},
             )
 
         def connection_cancelled() -> bool:
@@ -277,6 +280,7 @@ def run_once() -> None:
             connection["rustdesk_password"],
             mark_rustdesk_started,
             connection_cancelled,
+            mode,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         log(f"connect_start_failed task_id={connection['id']} type={type(exc).__name__}")
@@ -293,7 +297,7 @@ def run_once() -> None:
         request(
             f"/api/worker/connection-tasks/{connection['id']}",
             "PATCH",
-            {"status": "success", "phase": "session_established", "log": "客服电脑已建立 RustDesk 远程会话。"},
+            {"status": "success", "phase": "session_established", "log": f"客服电脑已建立 RustDesk {action}会话。"},
         )
     else:
         detail = connection_error_detail()
