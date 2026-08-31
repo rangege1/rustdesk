@@ -169,6 +169,15 @@ jobs:
           mv $msi.FullName ../../SignOutput/rustdesk-${{ env.VERSION }}-x86_64.msi
           Get-FileHash ../../SignOutput/rustdesk-*.msi -Algorithm SHA256
 
+      - name: Build staff Worker
+        shell: pwsh
+        run: |
+          python -m pip install pyinstaller
+          pyinstaller --noconfirm --clean --onefile --console --name rustdesk-worker --distpath ./rustdesk ./staff-worker/worker.py
+          if (-not (Test-Path ./rustdesk/rustdesk-worker.exe)) {
+            throw "客服 Worker EXE 未生成。"
+          }
+
       - name: Build single-file customer EXE
         shell: pwsh
         run: |
@@ -190,9 +199,17 @@ jobs:
       - name: Build single-file staff EXE
         shell: pwsh
         run: |
+          if (-not "${{ secrets.OPS_WORKER_TOKEN }}") {
+            throw "缺少 GitHub Secret：OPS_WORKER_TOKEN"
+          }
+          if (-not (Test-Path ./rustdesk/rustdesk-worker.exe)) {
+            throw "找不到 rustdesk-worker.exe"
+          }
           pwsh ./customer-installer/build-single-client.ps1 `
             -RustDeskDir ./rustdesk `
             -Role staff `
+            -WorkerExe ./rustdesk/rustdesk-worker.exe `
+            -WorkerToken "${{ secrets.OPS_WORKER_TOKEN }}" `
             -Output ./SignOutput/remote-install-staff-x86_64.exe
           Get-Item ./SignOutput/remote-install-staff-x86_64.exe | Select-Object Name, @{Name = 'SizeMB'; Expression = { [math]::Round($_.Length / 1MB, 2) }}
           Get-FileHash ./SignOutput/remote-install-staff-x86_64.exe -Algorithm SHA256
