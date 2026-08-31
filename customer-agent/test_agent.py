@@ -15,6 +15,12 @@ SPEC.loader.exec_module(agent)
 
 
 class CustomerAgentTests(unittest.TestCase):
+    def test_installer_artifacts_are_unique_per_task(self):
+        first = agent.CustomerAgent.installer_destination("python", 27)
+        second = agent.CustomerAgent.installer_destination("python", 28)
+        self.assertNotEqual(first, second)
+        self.assertTrue(str(first).endswith("pythonMain-task-27.exe"))
+
     def test_elevated_process_access_denied_means_still_running(self):
         with patch.object(agent.os, "kill", side_effect=PermissionError):
             self.assertTrue(agent.CustomerAgent.process_exists(1234))

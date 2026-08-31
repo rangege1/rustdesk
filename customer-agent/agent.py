@@ -20,7 +20,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
-AGENT_VERSION = "0.2.14"
+AGENT_VERSION = "0.2.15"
 POLL_SECONDS = 3
 HEARTBEAT_SECONDS = 60
 ARTIFACT_CLEANUP_INITIAL_DELAY_SECONDS = 15
@@ -351,10 +351,14 @@ class CustomerAgent:
         paths.append(Path(os.environ.get("PROGRAMDATA", str(Path.home()))) / "RemoteInstall" / suffix)
         return list(dict.fromkeys(paths))
 
-    def download_installer(self, runner: str) -> Path:
+    @staticmethod
+    def installer_destination(runner: str, task_id: int) -> Path:
+        return WORK_DIR / "installers" / f"{runner}Main-task-{task_id}.exe"
+
+    def download_installer(self, runner: str, task_id: int) -> Path:
         if runner not in RUNNERS:
             raise ValueError(f"不允许的安装器类型: {runner}")
-        destination = WORK_DIR / "installers" / f"{runner}Main.exe"
+        destination = self.installer_destination(runner, task_id)
         request = Request(
             f"{self.config.api_base}/api/agent/installers/{runner}?customer_id={self.config.customer_id}",
             headers={"X-Agent-Token": self.config.agent_token},
@@ -496,7 +500,7 @@ class CustomerAgent:
         versions = task.get("versions", {})
         LOGGER.info("task_received task_id=%s runner=%s software=%s versions=%s", task_id, runner, software, versions)
         self.report(task_id, "running", "正在下载受控安装器")
-        installer = self.download_installer(runner)
+        installer = self.download_installer(runner, task_id)
         self.report(task_id, "downloaded", "安装器下载并校验完成")
 
         if not isinstance(software, list) or not isinstance(versions, dict):
