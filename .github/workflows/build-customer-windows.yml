@@ -44,6 +44,19 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Enable file transfer defaults
+        shell: pwsh
+        run: |
+          $config = "libs/hbb_common/src/config.rs"
+          $text = Get-Content $config -Raw
+          $needle = 'keys::OPTION_CUSTOM_FPS => self.get_num_string(key, 30.0, 5.0, 120.0),'
+          $replacement = "$needle`r`n            keys::OPTION_ENABLE_FILE_TRANSFER => self.get_string(key, `"Y`", vec![`"`", `"N`"]),"
+          if (-not $text.Contains($needle)) { throw "RustDesk config insertion point not found" }
+          if (-not $text.Contains("OPTION_ENABLE_FILE_TRANSFER => self.get_string")) {
+            $text = $text.Replace($needle, $replacement)
+            Set-Content $config $text -NoNewline
+          }
+
       - name: Restore bridge files
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
