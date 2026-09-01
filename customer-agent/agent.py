@@ -7,6 +7,7 @@ import logging
 import logging.handlers
 import os
 import platform
+import psutil
 import shutil
 import socket
 import subprocess
@@ -539,6 +540,7 @@ class CustomerAgent:
         removed_installs: list[str] = []
         missing: list[str] = []
         failed: list[str] = []
+        stopped: list[str] = []
         for target in targets:
             if not isinstance(target, dict):
                 raise ValueError("退款清理目标格式无效")
@@ -554,6 +556,7 @@ class CustomerAgent:
                     missing.append(f"{label}（{path}）")
                 continue
             try:
+                stopped.extend(self.stop_processes_under(path))
                 if path.is_dir():
                     shutil.rmtree(path)
                 else:
@@ -570,12 +573,48 @@ class CustomerAgent:
             LOGGER.info("cleanup_removed task_id=%s path=%s", task_id, path)
         if failed:
             self.report(task_id, "failed", f"退款清理失败：{'；'.join(failed)}")
-        elif not removed_installs:
-            detail = "；".join(missing) or "未发现可删除的软件目录"
-            self.report(task_id, "failed", f"退款清理未执行：{detail}")
+        elif not removed_installs and not missing:
+            self.report(task_id, "failed", "退款清理未执行：未发现可清理的软件目录")
         else:
-            detail = "；".join(removed)
-            self.report(task_id, "success", f"退款清理完成，已永久删除：{detail}")
+            details = []
+            if stopped:
+                details.append(f"已关闭占用进程：{'；'.join(stopped)}")
+            if removed:
+                details.append(f"已永久删除：{'；'.join(removed)}")
+            if missing:
+                details.append(f"以下目标已不存在：{'；'.join(missing)}")
+            self.report(task_id, "success", f"退款清理完成；{'；'.join(details)}")
+
+    @staticmethod
+    def stop_processes_under(root: Path) -> list[str]:
+        stopped: list[str] = []
+        root = root.resolve()
+        processes = []
+        for process in psutil.process_iter(["pid", "name", "exe"]):
+            try:
+                executable = process.info.get("exe")
+                if not executable:
+                    continue
+                executable_path = Path(executable).resolve()
+                if executable_path != root and root not in executable_path.parents:
+                    continue
+                processes.append(process)
+            except (OSError, psutil.Error):
+                continue
+        for process in processes:
+            try:
+                process.terminate()
+                stopped.append(f"{process.info.get('name') or '未知进程'} (PID {process.pid})")
+            except (OSError, psutil.Error) as exc:
+                LOGGER.warning("cleanup_process_terminate_failed pid=%s error=%s", process.pid, exc)
+        gone, alive = psutil.wait_procs(processes, timeout=5)
+        for process in alive:
+            try:
+                process.kill()
+                LOGGER.info("cleanup_process_killed pid=%s", process.pid)
+            except (OSError, psutil.Error) as exc:
+                LOGGER.warning("cleanup_process_kill_failed pid=%s error=%s", process.pid, exc)
+        return stopped
 
     def run_once(self) -> None:
         for task_id in list(self.task_artifacts):

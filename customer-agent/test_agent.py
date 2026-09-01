@@ -88,14 +88,15 @@ class CustomerAgentTests(unittest.TestCase):
             report.assert_called_once_with(1, "cancelled", "运营人员已取消任务，安装器已关闭")
             cleanup.assert_called_once_with(1)
 
-    def test_cleanup_fails_when_no_installed_directory_is_deleted(self):
+    def test_cleanup_is_successful_when_installed_directory_is_already_missing(self):
         instance = agent.CustomerAgent(agent.AgentConfig("https://example.test", 1, "token"))
         target = {"path": r"C:\\missing\\maven_3.8.1", "root": r"C:\\missing", "kind": "install", "label": "Maven 3.8.1"}
         with patch.object(instance, "report") as report:
             instance.cleanup_task(7, [target])
         self.assertEqual(report.call_count, 2)
-        self.assertEqual(report.call_args_list[-1].args[1], "failed")
+        self.assertEqual(report.call_args_list[-1].args[1], "success")
         self.assertIn("Maven 3.8.1", report.call_args_list[-1].args[2])
+        self.assertIn("已不存在", report.call_args_list[-1].args[2])
 
     def test_cleanup_removes_download_cache_and_runtime_with_installation(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -118,6 +119,24 @@ class CustomerAgentTests(unittest.TestCase):
             self.assertFalse(runtime.exists())
             self.assertEqual(report.call_args_list[-1].args[1], "success")
             self.assertIn("下载缓存目录", report.call_args_list[-1].args[2])
+
+    def test_cleanup_terminates_processes_running_from_install_directory(self):
+        class FakeProcess:
+            pid = 321
+            info = {"pid": 321, "name": "python.exe", "exe": "C:/soft/anaconda/python.exe"}
+
+            def terminate(self):
+                self.terminated = True
+
+            def kill(self):
+                self.killed = True
+
+        process = FakeProcess()
+        with patch.object(agent.psutil, "process_iter", return_value=[process]), patch.object(agent.psutil, "wait_procs", return_value=([], [process])):
+            stopped = agent.CustomerAgent.stop_processes_under(Path("C:/soft/anaconda"))
+        self.assertEqual(stopped, ["python.exe (PID 321)"])
+        self.assertTrue(process.terminated)
+        self.assertTrue(process.killed)
 
 
 if __name__ == "__main__":
