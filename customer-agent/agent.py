@@ -22,7 +22,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
-AGENT_VERSION = "0.2.15"
+AGENT_VERSION = "0.2.16"
 POLL_SECONDS = 3
 HEARTBEAT_SECONDS = 60
 ARTIFACT_CLEANUP_INITIAL_DELAY_SECONDS = 15
@@ -30,6 +30,9 @@ ARTIFACT_CLEANUP_MAX_DELAY_SECONDS = 300
 INSTALLER_COMPLETION_TIMEOUT_SECONDS = 30 * 60
 RUNNERS = {"java", "python"}
 RUSTDESK_ID_RE = re.compile(r"\d[\d\s-]{4,}\d")
+RUSTDESK_ID_ATTEMPTS = 5
+RUSTDESK_ID_RETRY_SECONDS = 2
+_last_rustdesk_id = ""
 
 
 def machine_id() -> str:
@@ -54,27 +57,35 @@ def executable_dir() -> Path:
 
 def rustdesk_id() -> str:
     """Read the numeric RustDesk ID from the colocated client, if it is ready."""
+    global _last_rustdesk_id
     executable = executable_dir() / "rustdesk.exe"
     if not executable.exists():
-        return ""
-    try:
-        result = subprocess.run(
-            [str(executable), "--get-id"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=10,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-    except (OSError, subprocess.SubprocessError):
-        LOGGER.warning("rustdesk_id_unavailable")
-        return ""
-    match = RUSTDESK_ID_RE.search(result.stdout)
-    if not match:
-        return ""
-    value = "".join(char for char in match.group(0) if char.isdigit())
-    return value if 6 <= len(value) <= 20 else ""
+        return _last_rustdesk_id
+    for attempt in range(1, RUSTDESK_ID_ATTEMPTS + 1):
+        try:
+            result = subprocess.run(
+                [str(executable), "--get-id"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=10,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except (OSError, subprocess.SubprocessError):
+            result = None
+        if result is not None:
+            match = RUSTDESK_ID_RE.search(f"{result.stdout}\n{result.stderr}")
+            if match:
+                value = "".join(char for char in match.group(0) if char.isdigit())
+                if 6 <= len(value) <= 20:
+                    _last_rustdesk_id = value
+                    LOGGER.info("rustdesk_id_ready attempt=%s", attempt)
+                    return value
+        if attempt < RUSTDESK_ID_ATTEMPTS:
+            time.sleep(RUSTDESK_ID_RETRY_SECONDS)
+    LOGGER.warning("rustdesk_id_unavailable cached=%s", bool(_last_rustdesk_id))
+    return _last_rustdesk_id
 
 
 DEFAULT_CONFIG = executable_dir() / "agent-config.json"
@@ -684,6 +695,7 @@ if os.name == "nt":
     try:
         import win32service
         import win32serviceutil
+        import win32timezone
 
         class CustomerAgentService(win32serviceutil.ServiceFramework):
             _svc_name_ = SERVICE_NAME

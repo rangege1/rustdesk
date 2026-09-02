@@ -27,6 +27,24 @@ class CustomerAgentTests(unittest.TestCase):
         self.assertIn("class CustomerAgentService", source)
         self.assertIn("win32serviceutil.HandleCommandLine(CustomerAgentService)", source)
         self.assertIn("run_agent(self.stop_event)", source)
+        self.assertIn("import win32timezone", source)
+
+    def test_rustdesk_id_retries_until_client_is_ready(self):
+        executable = Path(agent.executable_dir()) / "rustdesk.exe"
+        first = type("Result", (), {"stdout": "", "stderr": "", "returncode": 0})()
+        second = type("Result", (), {"stdout": "176854346\\n", "stderr": "", "returncode": 0})()
+        with patch.object(agent, "_last_rustdesk_id", ""), patch.object(Path, "exists", return_value=True), patch.object(
+            agent.subprocess, "run", side_effect=[first, second]
+        ) as run, patch.object(agent.time, "sleep"):
+            self.assertEqual(agent.rustdesk_id(), "176854346")
+        self.assertEqual(run.call_count, 2)
+
+    def test_rustdesk_id_reads_stderr_and_keeps_last_value(self):
+        first = type("Result", (), {"stdout": "", "stderr": "RustDesk ID: 123456789", "returncode": 0})()
+        with patch.object(agent, "_last_rustdesk_id", ""), patch.object(Path, "exists", return_value=True), patch.object(
+            agent.subprocess, "run", return_value=first
+        ), patch.object(agent.time, "sleep"):
+            self.assertEqual(agent.rustdesk_id(), "123456789")
 
     def test_installer_artifacts_are_unique_per_task(self):
         first = agent.CustomerAgent.installer_destination("python", 27)
