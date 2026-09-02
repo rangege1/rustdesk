@@ -81,6 +81,8 @@ CONFIG_FILE = Path(os.environ.get("OPS_AGENT_CONFIG", DEFAULT_CONFIG))
 WORK_DIR = Path(os.environ.get("PROGRAMDATA", os.environ.get("LOCALAPPDATA", str(executable_dir())))) / "RemoteInstall" / "agent"
 LOG_DIR = WORK_DIR / "logs"
 LOG_FILE = LOG_DIR / "customer-agent.log"
+STARTUP_VALUE_NAME = "RemoteInstallCustomerAgent"
+STARTUP_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 
 
 def configure_logging() -> logging.Logger:
@@ -110,6 +112,23 @@ def configure_logging() -> logging.Logger:
 
 
 LOGGER = configure_logging()
+
+
+def ensure_agent_startup() -> bool:
+    """Repair the current user's startup entry without requiring elevation."""
+    if os.name != "nt":
+        return False
+    try:
+        import winreg
+
+        command = f'"{Path(sys.executable).resolve()}"'
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, STARTUP_KEY) as key:
+            winreg.SetValueEx(key, STARTUP_VALUE_NAME, 0, winreg.REG_SZ, command)
+        LOGGER.info("agent_startup_ok scope=current_user command=%s", command)
+        return True
+    except (OSError, ImportError) as exc:
+        LOGGER.warning("agent_startup_failed scope=current_user error=%s", exc)
+        return False
 
 
 @dataclass(frozen=True)
@@ -643,6 +662,7 @@ class CustomerAgent:
 
 def main() -> None:
     LOGGER.info("agent_start version=%s pid=%s", AGENT_VERSION, os.getpid())
+    ensure_agent_startup()
     agent = CustomerAgent(load_config())
     print(f"Customer Agent connected to {agent.config.api_base}")
     while True:

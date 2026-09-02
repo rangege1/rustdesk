@@ -15,6 +15,12 @@ SPEC.loader.exec_module(agent)
 
 
 class CustomerAgentTests(unittest.TestCase):
+    def test_startup_registration_is_defined_and_called_before_agent_loop(self):
+        source = Path(__file__).with_name("agent.py").read_text(encoding="utf-8")
+        self.assertIn("def ensure_agent_startup() -> bool:", source)
+        self.assertIn('STARTUP_VALUE_NAME = "RemoteInstallCustomerAgent"', source)
+        self.assertIn("ensure_agent_startup()", source)
+
     def test_installer_artifacts_are_unique_per_task(self):
         first = agent.CustomerAgent.installer_destination("python", 27)
         second = agent.CustomerAgent.installer_destination("python", 28)
