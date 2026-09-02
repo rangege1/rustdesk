@@ -104,6 +104,7 @@ try
     if (isCustomer)
     {
         DisableCustomerAgentStartup();
+        StopCustomerAgentService();
         StopProcesses("customer-agent");
     }
     else
@@ -173,13 +174,13 @@ try
     {
         SetRustDeskPassword(rustDesk, finalInstallRoot);
         var agent = Path.Combine(finalInstallRoot, "customer-agent.exe");
-        ConfigureCustomerAgentStartup(agent);
-        StartChild(agent, "customer-agent", finalInstallRoot);
-        Log("customer_agent_started");
+        ConfigureCustomerAgentService(agent, finalInstallRoot);
+        Log("customer_agent_service_started");
     }
     else
     {
         var worker = Path.Combine(finalInstallRoot, "rustdesk-worker.exe");
+        SetRustDeskPassword(rustDesk, finalInstallRoot);
         ConfigureStaffWorkerStartup(worker);
         StartChild(worker, "rustdesk-worker", finalInstallRoot);
         Log("staff_worker_started");
@@ -330,11 +331,44 @@ void DisableCustomerAgentStartup()
     Log("customer_agent_startup_disabled");
 }
 
-void ConfigureCustomerAgentStartup(string agent)
+void StopCustomerAgentService()
 {
-    using var key = Microsoft.Win32.Registry.LocalMachine.CreateSubKey(
-        @"Software\Microsoft\Windows\CurrentVersion\Run");
-    key!.SetValue("RemoteInstallCustomerAgent", $"\"{agent}\"");
+    var agent = Path.Combine(customerInstallRoot, "customer-agent.exe");
+    if (!File.Exists(agent))
+        return;
+    RunAgentServiceCommand(agent, "stop", false);
+    RunAgentServiceCommand(agent, "remove", false);
+    Log("customer_agent_service_removed");
+}
+
+void ConfigureCustomerAgentService(string agent, string installRoot)
+{
+    RunAgentServiceCommand(agent, "install", true);
+    RunAgentServiceCommand(agent, "start", true);
+}
+
+void RunAgentServiceCommand(string agent, string command, bool required)
+{
+    using var process = Process.Start(new ProcessStartInfo
+    {
+        FileName = agent,
+        Arguments = command,
+        WorkingDirectory = Path.GetDirectoryName(agent)!,
+        UseShellExecute = false,
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+        CreateNoWindow = true,
+    });
+    if (process is null)
+    {
+        if (required) throw new InvalidOperationException($"无法执行 Agent 服务命令 {command}");
+        return;
+    }
+    var output = process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd();
+    process.WaitForExit(30000);
+    Log($"customer_agent_service_command command={command} exit={process.ExitCode}");
+    if (required && process.ExitCode != 0)
+        throw new InvalidOperationException($"Agent 服务命令 {command} 失败：{output.Trim()}");
 }
 
 void DisableStaffWorkerStartup()

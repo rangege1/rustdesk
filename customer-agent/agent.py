@@ -12,6 +12,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import threading
 import time
 import re
 from dataclasses import dataclass
@@ -83,6 +84,7 @@ LOG_DIR = WORK_DIR / "logs"
 LOG_FILE = LOG_DIR / "customer-agent.log"
 STARTUP_VALUE_NAME = "RemoteInstallCustomerAgent"
 STARTUP_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+SERVICE_NAME = "RemoteInstallCustomerAgent"
 
 
 def configure_logging() -> logging.Logger:
@@ -660,18 +662,57 @@ class CustomerAgent:
             self.last_empty_poll_log = time.monotonic()
 
 
-def main() -> None:
-    LOGGER.info("agent_start version=%s pid=%s", AGENT_VERSION, os.getpid())
-    ensure_agent_startup()
+def run_agent(stop_event: threading.Event | None = None) -> None:
+    LOGGER.info("agent_start version=%s pid=%s service=%s", AGENT_VERSION, os.getpid(), bool(stop_event))
+    if stop_event is None:
+        ensure_agent_startup()
     agent = CustomerAgent(load_config())
     print(f"Customer Agent connected to {agent.config.api_base}")
-    while True:
+    while stop_event is None or not stop_event.is_set():
         try:
             agent.run_once()
         except Exception as exc:
             LOGGER.exception("agent_loop_error type=%s", type(exc).__name__)
             print(f"agent error: {exc}")
-        time.sleep(POLL_SECONDS)
+        if stop_event is not None:
+            stop_event.wait(POLL_SECONDS)
+        else:
+            time.sleep(POLL_SECONDS)
+
+
+if os.name == "nt":
+    try:
+        import win32service
+        import win32serviceutil
+
+        class CustomerAgentService(win32serviceutil.ServiceFramework):
+            _svc_name_ = SERVICE_NAME
+            _svc_display_name_ = "RemoteInstall Customer Agent"
+            _svc_description_ = "Runs the authorized RemoteInstall customer maintenance agent."
+
+            def __init__(self, args):
+                super().__init__(args)
+                self.stop_event = threading.Event()
+
+            def SvcStop(self):
+                self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
+                self.stop_event.set()
+
+            def SvcDoRun(self):
+                run_agent(self.stop_event)
+    except ImportError:
+        CustomerAgentService = None
+else:
+    CustomerAgentService = None
+
+
+def main() -> None:
+    if len(sys.argv) > 1 and sys.argv[1].lower() in {"install", "update", "remove", "start", "stop", "restart", "debug"}:
+        if CustomerAgentService is None:
+            raise RuntimeError("Windows Service support is unavailable")
+        win32serviceutil.HandleCommandLine(CustomerAgentService)
+        return
+    run_agent()
 
 
 if __name__ == "__main__":

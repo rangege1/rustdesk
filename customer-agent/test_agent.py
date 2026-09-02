@@ -21,6 +21,13 @@ class CustomerAgentTests(unittest.TestCase):
         self.assertIn('STARTUP_VALUE_NAME = "RemoteInstallCustomerAgent"', source)
         self.assertIn("ensure_agent_startup()", source)
 
+    def test_agent_has_independent_windows_service_entrypoint(self):
+        source = Path(__file__).with_name("agent.py").read_text(encoding="utf-8")
+        self.assertIn('SERVICE_NAME = "RemoteInstallCustomerAgent"', source)
+        self.assertIn("class CustomerAgentService", source)
+        self.assertIn("win32serviceutil.HandleCommandLine(CustomerAgentService)", source)
+        self.assertIn("run_agent(self.stop_event)", source)
+
     def test_installer_artifacts_are_unique_per_task(self):
         first = agent.CustomerAgent.installer_destination("python", 27)
         second = agent.CustomerAgent.installer_destination("python", 28)
