@@ -247,6 +247,65 @@ class CustomerAgent:
         return password
 
     @staticmethod
+    def execute_ai_action(action: dict) -> str:
+        """Execute only the backend-approved, non-shell diagnostic tools."""
+        tool = str(action.get("tool_name", ""))
+        parameters = action.get("parameters") or {}
+        if tool == "get_system_info":
+            return json.dumps({"computer_name": socket.gethostname(), "platform": platform.platform(), "python": sys.version}, ensure_ascii=False)
+        if tool == "get_processes":
+            rows = []
+            for process in psutil.process_iter(["pid", "name", "exe"]):
+                try:
+                    rows.append(process.info)
+                except psutil.Error:
+                    continue
+            return json.dumps(rows[:300], ensure_ascii=False)
+        if tool == "get_ports":
+            rows = []
+            for connection in psutil.net_connections(kind="inet"):
+                if connection.laddr:
+                    rows.append({"pid": connection.pid, "status": connection.status, "address": f"{connection.laddr.ip}:{connection.laddr.port}"})
+            return json.dumps(rows[:300], ensure_ascii=False)
+        if tool in {"check_java", "check_python", "check_conda"}:
+            executable = {"check_java": "java", "check_python": "python", "check_conda": "conda"}[tool]
+            result = subprocess.run([executable, "--version"], capture_output=True, text=True, timeout=15, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            return (result.stdout or result.stderr).strip()
+        if tool == "read_log":
+            path = Path(str(parameters.get("path", "")).strip()).resolve()
+            if not path.is_file() or path.stat().st_size > 2 * 1024 * 1024:
+                raise ValueError("日志路径无效或文件超过 2 MB")
+            return path.read_text(encoding="utf-8", errors="replace")[-20_000:]
+        if tool in {"start_java_project", "start_python_project"}:
+            working_dir = Path(str(parameters.get("working_dir", "")).strip()).resolve()
+            entry = str(parameters.get("entry", "")).strip()
+            if not working_dir.is_dir() or not entry or any(char in entry for char in "&|<>\"'"):
+                raise ValueError("项目目录或启动入口无效")
+            if tool == "start_java_project" and not entry.endswith(".jar"):
+                raise ValueError("Java 项目入口必须是 .jar 文件")
+            if tool == "start_python_project" and not entry.endswith(".py"):
+                raise ValueError("Python 项目入口必须是 .py 文件")
+            executable = "java" if tool == "start_java_project" else sys.executable
+            args = [executable, "-jar", entry] if tool == "start_java_project" else [executable, entry]
+            process = subprocess.Popen(args, cwd=working_dir, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            return f"已启动 {tool}，PID={process.pid}"
+        raise ValueError("未授权的智能工具")
+
+    def poll_ai_action(self) -> None:
+        action = self.request(f"/api/agent/ai-actions?customer_id={self.config.customer_id}")
+        if not action:
+            return
+        try:
+            result = self.execute_ai_action(action)
+            status = "completed"
+        except Exception as exc:
+            result = f"{type(exc).__name__}: {exc}"
+            status = "failed"
+            LOGGER.exception("ai_action_failed action_id=%s", action.get("id"))
+        self.request(f"/api/agent/ai-actions/{action['id']}", "PATCH", {"status": status, "result": result})
+        LOGGER.info("ai_action_finished action_id=%s status=%s", action.get("id"), status)
+
+    @staticmethod
     def installer_status_message(status: dict, message: str) -> str:
         parts = [message] if message else []
         install_path = str(status.get("actual_install_path", "")).strip()
@@ -525,6 +584,9 @@ class CustomerAgent:
 
     def start_task(self, task: dict) -> None:
         task_id = int(task["id"])
+        if task.get("kind") == "disk_cleanup":
+            self.disk_cleanup_task(task_id, task.get("install_path", ""))
+            return
         if task.get("kind", "install") == "cleanup":
             self.cleanup_task(task_id, task.get("cleanup_targets", []))
             return
@@ -563,6 +625,43 @@ class CustomerAgent:
         self.last_task_status.pop(task_id, None)
         self.report(task_id, "waiting_password", "安装器已启动，等待客户在本机确认并输入安装密码")
         LOGGER.info("task_waiting_customer task_id=%s", task_id)
+
+    def disk_cleanup_task(self, task_id: int, drive: str) -> None:
+        if os.name != "nt" or not re.fullmatch(r"[D-Zd-z]:\\?", drive.strip()):
+            self.report(task_id, "failed", "磁盘清理失败：仅支持 Windows D-Z 盘符")
+            return
+        root = Path(drive.strip().rstrip("\\") + "\\")
+        if root.drive.upper() == "C:":
+            self.report(task_id, "failed", "磁盘清理失败：禁止清理系统盘 C 盘")
+            return
+        cleanup_roots = [root / "RemoteInstall", root / "soft" / "package", root / "Temp"]
+        removed: list[str] = []
+        failed: list[str] = []
+        self.report(task_id, "running", f"正在清理磁盘 {root.drive}，跳过系统保护目录")
+        for cleanup_root in cleanup_roots:
+            if not cleanup_root.exists():
+                continue
+            try:
+                entries = list(cleanup_root.iterdir())
+            except OSError as exc:
+                failed.append(f"{cleanup_root}：{exc}")
+                continue
+            for path in entries:
+                if path.name in {"System Volume Information", "$RECYCLE.BIN"}:
+                    continue
+                try:
+                    self.stop_processes_under(path)
+                    if path.is_dir():
+                        shutil.rmtree(path)
+                    else:
+                        path.unlink()
+                    removed.append(str(path))
+                except OSError as exc:
+                    failed.append(f"{path}：{exc}")
+        if failed:
+            self.report(task_id, "failed", f"磁盘 {root.drive} 清理部分失败；已删除 {len(removed)} 项；失败：{'；'.join(failed[:50])}")
+        else:
+            self.report(task_id, "success", f"磁盘 {root.drive} 清理完成；已删除 {len(removed)} 项；系统保护目录已跳过")
 
     def cleanup_task(self, task_id: int, targets: object) -> None:
         if not isinstance(targets, list):
@@ -654,6 +753,7 @@ class CustomerAgent:
                 self.cleanup_task_artifacts(task_id)
         if time.monotonic() - self.last_heartbeat >= HEARTBEAT_SECONDS:
             self.heartbeat()
+        self.poll_ai_action()
         self.update_active_tasks()
         if self.active_tasks:
             return
