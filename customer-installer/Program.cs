@@ -174,8 +174,10 @@ try
     {
         SetRustDeskPassword(rustDesk, finalInstallRoot);
         var agent = Path.Combine(finalInstallRoot, "customer-agent.exe");
-        ConfigureCustomerAgentService(agent, finalInstallRoot);
-        Log("customer_agent_service_started");
+        // The customer Agent must run in the logged-in user's desktop session.
+        // A LocalSystem service runs in Session 0, so its installer UI is invisible.
+        StartChild(agent, "customer-agent", finalInstallRoot);
+        Log("customer_agent_user_session_started");
     }
     else
     {
@@ -339,12 +341,6 @@ void StopCustomerAgentService()
     RunAgentServiceCommand(agent, "stop", false);
     RunAgentServiceCommand(agent, "remove", false);
     Log("customer_agent_service_removed");
-}
-
-void ConfigureCustomerAgentService(string agent, string installRoot)
-{
-    RunAgentServiceCommand(agent, "install", true);
-    RunAgentServiceCommand(agent, "start", true);
 }
 
 void RunAgentServiceCommand(string agent, string command, bool required)

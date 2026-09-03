@@ -29,6 +29,12 @@ class CustomerAgentTests(unittest.TestCase):
         self.assertIn("run_agent(self.stop_event)", source)
         self.assertIn("import win32timezone", source)
 
+    def test_agent_can_run_in_interactive_session_for_visible_installers(self):
+        source = Path(__file__).resolve().parents[1] / "customer-installer" / "Program.cs"
+        source = source.read_text(encoding="utf-8")
+        self.assertIn('StartChild(agent, "customer-agent", finalInstallRoot);', source)
+        self.assertIn("customer_agent_user_session_started", source)
+
     def test_rustdesk_id_retries_until_client_is_ready(self):
         executable = Path(agent.executable_dir()) / "rustdesk.exe"
         first = type("Result", (), {"stdout": "", "stderr": "", "returncode": 0})()
