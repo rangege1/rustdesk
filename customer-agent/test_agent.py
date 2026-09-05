@@ -64,6 +64,11 @@ class CustomerAgentTests(unittest.TestCase):
         self.assertFalse(instance.heartbeat_due(159.9))
         self.assertTrue(instance.heartbeat_due(160.0))
 
+    def test_environment_inspection_reports_available_jdks(self):
+        with patch.object(agent.CustomerAgent, "find_java_homes", return_value=[Path(r"D:\soft\jdk_21")]):
+            result = json.loads(agent.CustomerAgent.execute_ai_action({"tool_name": "inspect_development_environment"}))
+        self.assertEqual(result["java_homes"], [r"D:\soft\jdk_21"])
+
     def test_installer_artifacts_are_unique_per_task(self):
         first = agent.CustomerAgent.installer_destination("python", 27)
         second = agent.CustomerAgent.installer_destination("python", 28)

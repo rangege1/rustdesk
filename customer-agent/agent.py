@@ -274,6 +274,38 @@ class CustomerAgent:
                 if connection.laddr:
                     rows.append({"pid": connection.pid, "status": connection.status, "address": f"{connection.laddr.ip}:{connection.laddr.port}"})
             return json.dumps(rows[:300], ensure_ascii=False)
+        if tool == "inspect_development_environment":
+            java_homes = CustomerAgent.find_java_homes()
+            checks = {}
+            for name, executable in {"java": "java", "python": "python", "conda": "conda"}.items():
+                try:
+                    result = subprocess.run([executable, "--version"], capture_output=True, text=True, timeout=15, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                    checks[name] = (result.stdout or result.stderr).strip()
+                except (OSError, subprocess.SubprocessError) as exc:
+                    checks[name] = f"unavailable: {type(exc).__name__}"
+            return json.dumps({"java_homes": [str(path) for path in java_homes], "java_home": os.environ.get("JAVA_HOME", ""), "path_contains_java_home": "%JAVA_HOME%\\bin".lower() in os.environ.get("Path", "").lower(), "checks": checks}, ensure_ascii=False)
+        if tool == "repair_java_environment":
+            java_homes = CustomerAgent.find_java_homes()
+            if not java_homes:
+                raise ValueError("未找到可用 JDK，未修改环境变量")
+            java_home = str(java_homes[0])
+            if os.name != "nt":
+                raise ValueError("Java 环境修复仅支持 Windows 客户 Agent")
+            import winreg
+
+            with winreg.CreateKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment") as key:
+                try:
+                    path_value = str(winreg.QueryValueEx(key, "Path")[0])
+                except FileNotFoundError:
+                    path_value = ""
+                if "%JAVA_HOME%\\bin".lower() not in path_value.lower():
+                    path_value = f"{path_value};%JAVA_HOME%\\bin".strip(";")
+                    winreg.SetValueEx(key, "Path", 0, winreg.REG_EXPAND_SZ, path_value)
+                winreg.SetValueEx(key, "JAVA_HOME", 0, winreg.REG_EXPAND_SZ, java_home)
+            os.environ["JAVA_HOME"] = java_home
+            os.environ["Path"] = f"{java_home}\\bin;{os.environ.get('Path', '')}"
+            result = subprocess.run([str(java_homes[0] / "bin" / "java.exe"), "--version"], capture_output=True, text=True, timeout=15, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            return json.dumps({"java_home": java_home, "verified": (result.stdout or result.stderr).strip()}, ensure_ascii=False)
         if tool in {"check_java", "check_python", "check_conda"}:
             executable = {"check_java": "java", "check_python": "python", "check_conda": "conda"}[tool]
             result = subprocess.run([executable, "--version"], capture_output=True, text=True, timeout=15, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -297,6 +329,19 @@ class CustomerAgent:
             process = subprocess.Popen(args, cwd=working_dir, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             return f"已启动 {tool}，PID={process.pid}"
         raise ValueError("未授权的智能工具")
+
+    @staticmethod
+    def find_java_homes() -> list[Path]:
+        roots = [Path(os.environ.get("JAVA_HOME", "")), Path(r"D:\soft"), Path(r"C:\soft"), Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Java", Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Eclipse Adoptium"]
+        homes: list[Path] = []
+        for root in roots:
+            if not str(root) or not root.exists():
+                continue
+            candidates = [root] if (root / "bin" / "java.exe").is_file() else list(root.glob("jdk*"))
+            for candidate in candidates:
+                if (candidate / "bin" / "java.exe").is_file() and candidate not in homes:
+                    homes.append(candidate)
+        return homes
 
     def poll_ai_action(self) -> None:
         action = self.request(f"/api/agent/ai-actions?customer_id={self.config.customer_id}")
