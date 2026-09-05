@@ -25,6 +25,7 @@ from urllib.request import Request, urlopen
 AGENT_VERSION = "0.2.16"
 POLL_SECONDS = 3
 HEARTBEAT_SECONDS = 60
+RUSTDESK_ID_HEARTBEAT_RETRY_SECONDS = 10
 ARTIFACT_CLEANUP_INITIAL_DELAY_SECONDS = 15
 ARTIFACT_CLEANUP_MAX_DELAY_SECONDS = 300
 INSTALLER_COMPLETION_TIMEOUT_SECONDS = 30 * 60
@@ -181,6 +182,7 @@ class CustomerAgent:
         self.artifact_cleanup_retries: dict[int, tuple[int, float]] = {}
         self.last_task_status: dict[int, tuple[str, str]] = {}
         self.last_heartbeat = 0.0
+        self.last_rustdesk_id = ""
         self.last_empty_poll_log = 0.0
         (WORK_DIR / "installers").mkdir(parents=True, exist_ok=True)
         (WORK_DIR / "status").mkdir(parents=True, exist_ok=True)
@@ -230,7 +232,12 @@ class CustomerAgent:
             },
         )
         self.last_heartbeat = time.monotonic()
+        self.last_rustdesk_id = current_rustdesk_id
         LOGGER.info("heartbeat_ok")
+
+    def heartbeat_due(self, current_time: float) -> bool:
+        interval = HEARTBEAT_SECONDS if self.last_rustdesk_id else RUSTDESK_ID_HEARTBEAT_RETRY_SECONDS
+        return current_time - self.last_heartbeat >= interval
 
     def report(self, task_id: int, status: str, log: str, actual_install_path: str = "") -> None:
         LOGGER.info("task_status task_id=%s status=%s message=%s", task_id, status, log[:160].replace("\n", " "))
@@ -751,7 +758,7 @@ class CustomerAgent:
         for task_id in list(self.task_artifacts):
             if task_id not in self.active_tasks:
                 self.cleanup_task_artifacts(task_id)
-        if time.monotonic() - self.last_heartbeat >= HEARTBEAT_SECONDS:
+        if self.heartbeat_due(time.monotonic()):
             self.heartbeat()
         self.poll_ai_action()
         self.update_active_tasks()

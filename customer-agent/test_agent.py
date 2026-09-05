@@ -29,11 +29,14 @@ class CustomerAgentTests(unittest.TestCase):
         self.assertIn("run_agent(self.stop_event)", source)
         self.assertIn("import win32timezone", source)
 
-    def test_agent_can_run_in_interactive_session_for_visible_installers(self):
+    def test_agent_is_started_at_boot_as_system_with_restart(self):
         source = Path(__file__).resolve().parents[1] / "customer-installer" / "Program.cs"
         source = source.read_text(encoding="utf-8")
-        self.assertIn('StartChild(agent, "customer-agent", finalInstallRoot);', source)
-        self.assertIn("customer_agent_user_session_started", source)
+        self.assertIn("void ConfigureCustomerAgentStartup(string agent)", source)
+        self.assertIn("<BootTrigger><Enabled>true</Enabled><Delay>PT30S</Delay></BootTrigger>", source)
+        self.assertIn("<UserId>S-1-5-18</UserId><LogonType>ServiceAccount</LogonType>", source)
+        self.assertIn('<Interval>PT1M</Interval><Count>999</Count>', source)
+        self.assertIn('RunScheduledTaskCommand("/Run /TN \\"RemoteInstallCustomerAgent\\"", true);', source)
 
     def test_rustdesk_id_retries_until_client_is_ready(self):
         executable = Path(agent.executable_dir()) / "rustdesk.exe"
@@ -51,6 +54,15 @@ class CustomerAgentTests(unittest.TestCase):
             agent.subprocess, "run", return_value=first
         ), patch.object(agent.time, "sleep"):
             self.assertEqual(agent.rustdesk_id(), "123456789")
+
+    def test_missing_rustdesk_id_retries_heartbeat_every_ten_seconds(self):
+        instance = agent.CustomerAgent(agent.AgentConfig("https://example.test", 1, "token"))
+        instance.last_heartbeat = 100.0
+        self.assertFalse(instance.heartbeat_due(109.9))
+        self.assertTrue(instance.heartbeat_due(110.0))
+        instance.last_rustdesk_id = "123456789"
+        self.assertFalse(instance.heartbeat_due(159.9))
+        self.assertTrue(instance.heartbeat_due(160.0))
 
     def test_installer_artifacts_are_unique_per_task(self):
         first = agent.CustomerAgent.installer_destination("python", 27)

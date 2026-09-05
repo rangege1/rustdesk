@@ -174,10 +174,8 @@ try
     {
         SetRustDeskPassword(rustDesk, finalInstallRoot);
         var agent = Path.Combine(finalInstallRoot, "customer-agent.exe");
-        // The customer Agent must run in the logged-in user's desktop session.
-        // A LocalSystem service runs in Session 0, so its installer UI is invisible.
-        StartChild(agent, "customer-agent", finalInstallRoot);
-        Log("customer_agent_user_session_started");
+        ConfigureCustomerAgentStartup(agent);
+        Log("customer_agent_scheduled_task_started");
     }
     else
     {
@@ -330,7 +328,56 @@ void DisableCustomerAgentStartup()
     using var key = Microsoft.Win32.Registry.LocalMachine.CreateSubKey(
         @"Software\Microsoft\Windows\CurrentVersion\Run");
     key!.DeleteValue("RemoteInstallCustomerAgent", false);
+    RunScheduledTaskCommand("/Delete /TN \"RemoteInstallCustomerAgent\" /F", false);
     Log("customer_agent_startup_disabled");
+}
+
+void ConfigureCustomerAgentStartup(string agent)
+{
+    var taskXml = $"""
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <Triggers><BootTrigger><Enabled>true</Enabled><Delay>PT30S</Delay></BootTrigger></Triggers>
+  <Principals><Principal id="Author"><UserId>S-1-5-18</UserId><LogonType>ServiceAccount</LogonType><RunLevel>HighestAvailable</RunLevel></Principal></Principals>
+  <Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><StartWhenAvailable>true</StartWhenAvailable><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><RestartOnFailure><Interval>PT1M</Interval><Count>999</Count></RestartOnFailure></Settings>
+  <Actions Context="Author"><Exec><Command>{System.Security.SecurityElement.Escape(agent)}</Command><WorkingDirectory>{System.Security.SecurityElement.Escape(Path.GetDirectoryName(agent)!)}</WorkingDirectory></Exec></Actions>
+</Task>
+""";
+    var taskFile = Path.Combine(Path.GetTempPath(), "RemoteInstallCustomerAgent.xml");
+    File.WriteAllText(taskFile, taskXml, new UnicodeEncoding(false, true));
+    try
+    {
+        RunScheduledTaskCommand($"/Create /TN \"RemoteInstallCustomerAgent\" /XML \"{taskFile}\" /F", true);
+        RunScheduledTaskCommand("/Run /TN \"RemoteInstallCustomerAgent\"", true);
+        Log("customer_agent_scheduled_task_configured restart_interval=PT1M restart_count=999");
+    }
+    finally
+    {
+        try { File.Delete(taskFile); } catch { }
+    }
+}
+
+void RunScheduledTaskCommand(string arguments, bool required)
+{
+    using var process = Process.Start(new ProcessStartInfo
+    {
+        FileName = "schtasks.exe",
+        Arguments = arguments,
+        UseShellExecute = false,
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+        CreateNoWindow = true,
+    });
+    if (process is null)
+    {
+        if (required) throw new InvalidOperationException("无法启动 Windows 任务计划程序");
+        return;
+    }
+    var output = process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd();
+    process.WaitForExit(30000);
+    Log($"customer_agent_scheduled_task_command exit={process.ExitCode}");
+    if (required && process.ExitCode != 0)
+        throw new InvalidOperationException($"客户 Agent 自启动任务配置失败：{output.Trim()}");
 }
 
 void StopCustomerAgentService()
