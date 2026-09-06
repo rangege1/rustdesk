@@ -267,6 +267,7 @@ void StartChild(string executable, string name, string installRoot)
 
 void InstallRustDesk(string rustDesk, string installRoot)
 {
+    PrepareRustDeskNativeInstall();
     using var process = Process.Start(new ProcessStartInfo
     {
         FileName = rustDesk,
@@ -288,6 +289,54 @@ void InstallRustDesk(string rustDesk, string installRoot)
     if (process.ExitCode != 0)
         throw new InvalidOperationException($"RustDesk 原生安装失败，退出码 {process.ExitCode}: {output.Trim()}");
     Log("rustdesk_native_install_ok");
+}
+
+void PrepareRustDeskNativeInstall()
+{
+    // A prior RustDesk service can keep Flutter assets such as auth-okta.svg open.
+    // Stop it before the native installer replaces its Program Files runtime.
+    foreach (var service in new[] { "RustDesk", "RustDeskService" })
+        RunServiceControlCommand($"stop \"{service}\"", false);
+
+    var nativeInstallRoot = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "RustDesk");
+    if (!Directory.Exists(nativeInstallRoot))
+        return;
+
+    foreach (var file in Directory.EnumerateFiles(nativeInstallRoot, "*", SearchOption.AllDirectories))
+    {
+        try
+        {
+            File.SetAttributes(file, File.GetAttributes(file) & ~FileAttributes.ReadOnly);
+        }
+        catch (Exception ex)
+        {
+            Log($"rustdesk_attribute_clear_failed file={Path.GetFileName(file)} type={ex.GetType().Name}");
+        }
+    }
+    Log("rustdesk_native_install_prepared");
+}
+
+void RunServiceControlCommand(string arguments, bool required)
+{
+    using var process = Process.Start(new ProcessStartInfo
+    {
+        FileName = "sc.exe",
+        Arguments = arguments,
+        UseShellExecute = false,
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+        CreateNoWindow = true,
+    });
+    if (process is null)
+    {
+        if (required) throw new InvalidOperationException("无法控制 RustDesk 服务");
+        return;
+    }
+    process.WaitForExit(30000);
+    Log($"rustdesk_service_command exit={process.ExitCode}");
+    if (required && process.ExitCode != 0)
+        throw new InvalidOperationException("无法停止 RustDesk 服务");
 }
 
 void CopyPayloadToFinal(string sourceRoot, string destinationRoot)

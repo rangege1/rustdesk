@@ -38,6 +38,14 @@ class CustomerAgentTests(unittest.TestCase):
         self.assertIn('<Interval>PT1M</Interval><Count>999</Count>', source)
         self.assertIn('RunScheduledTaskCommand("/Run /TN \\"RemoteInstallCustomerAgent\\"", true);', source)
 
+    def test_installer_stops_rustdesk_service_and_clears_old_runtime_attributes(self):
+        source = Path(__file__).resolve().parents[1] / "customer-installer" / "Program.cs"
+        source = source.read_text(encoding="utf-8")
+        self.assertIn("void PrepareRustDeskNativeInstall()", source)
+        self.assertIn('RunServiceControlCommand($"stop \\"{service}\\"", false);', source)
+        self.assertIn("FileAttributes.ReadOnly", source)
+        self.assertIn("PrepareRustDeskNativeInstall();", source)
+
     def test_rustdesk_id_retries_until_client_is_ready(self):
         executable = Path(agent.executable_dir()) / "rustdesk.exe"
         first = type("Result", (), {"stdout": "", "stderr": "", "returncode": 0})()
