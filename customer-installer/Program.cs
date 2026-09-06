@@ -383,27 +383,13 @@ void DisableCustomerAgentStartup()
 
 void ConfigureCustomerAgentStartup(string agent)
 {
-    var taskXml = $"""
-<?xml version="1.0" encoding="UTF-16"?>
-<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
-  <Triggers><BootTrigger><Enabled>true</Enabled><Delay>PT30S</Delay></BootTrigger></Triggers>
-  <Principals><Principal id="Author"><UserId>S-1-5-18</UserId><LogonType>ServiceAccount</LogonType><RunLevel>HighestAvailable</RunLevel></Principal></Principals>
-  <Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><StartWhenAvailable>true</StartWhenAvailable><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><RestartOnFailure><Interval>PT1M</Interval><Count>999</Count></RestartOnFailure></Settings>
-  <Actions Context="Author"><Exec><Command>{System.Security.SecurityElement.Escape(agent)}</Command><WorkingDirectory>{System.Security.SecurityElement.Escape(Path.GetDirectoryName(agent)!)}</WorkingDirectory></Exec></Actions>
-</Task>
-""";
-    var taskFile = Path.Combine(Path.GetTempPath(), "RemoteInstallCustomerAgent.xml");
-    File.WriteAllText(taskFile, taskXml, new UnicodeEncoding(false, true));
-    try
-    {
-        RunScheduledTaskCommand($"/Create /TN \"RemoteInstallCustomerAgent\" /XML \"{taskFile}\" /F", true);
-        RunScheduledTaskCommand("/Run /TN \"RemoteInstallCustomerAgent\"", true);
-        Log("customer_agent_scheduled_task_configured restart_interval=PT1M restart_count=999");
-    }
-    finally
-    {
-        try { File.Delete(taskFile); } catch { }
-    }
+    // Older Task Scheduler versions reject the XML ServiceAccount LogonType.
+    // schtasks creates the same boot task with the portable SYSTEM account syntax.
+    var taskCommand = $"\\\"{agent}\\\"";
+    RunScheduledTaskCommand(
+        $"/Create /TN \"RemoteInstallCustomerAgent\" /TR \"{taskCommand}\" /SC ONSTART /RU SYSTEM /RL HIGHEST /F", true);
+    RunScheduledTaskCommand("/Run /TN \"RemoteInstallCustomerAgent\"", true);
+    Log("customer_agent_scheduled_task_configured trigger=ONSTART account=SYSTEM");
 }
 
 void RunScheduledTaskCommand(string arguments, bool required)

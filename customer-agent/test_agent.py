@@ -29,14 +29,14 @@ class CustomerAgentTests(unittest.TestCase):
         self.assertIn("run_agent(self.stop_event)", source)
         self.assertIn("import win32timezone", source)
 
-    def test_agent_is_started_at_boot_as_system_with_restart(self):
+    def test_agent_is_started_at_boot_as_system(self):
         source = Path(__file__).resolve().parents[1] / "customer-installer" / "Program.cs"
         source = source.read_text(encoding="utf-8")
         self.assertIn("void ConfigureCustomerAgentStartup(string agent)", source)
-        self.assertIn("<BootTrigger><Enabled>true</Enabled><Delay>PT30S</Delay></BootTrigger>", source)
-        self.assertIn("<UserId>S-1-5-18</UserId><LogonType>ServiceAccount</LogonType>", source)
-        self.assertIn('<Interval>PT1M</Interval><Count>999</Count>', source)
-        self.assertIn('RunScheduledTaskCommand("/Run /TN \\"RemoteInstallCustomerAgent\\"", true);', source)
+        self.assertIn("/SC ONSTART /RU SYSTEM /RL HIGHEST /F", source)
+        self.assertIn('RunScheduledTaskCommand("/Run /TN', source)
+        self.assertIn('RemoteInstallCustomerAgent', source)
+        self.assertNotIn("<LogonType>ServiceAccount</LogonType>", source)
 
     def test_installer_stops_rustdesk_service_and_clears_old_runtime_attributes(self):
         source = Path(__file__).resolve().parents[1] / "customer-installer" / "Program.cs"
