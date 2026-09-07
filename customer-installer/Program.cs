@@ -334,9 +334,9 @@ void RunServiceControlCommand(string arguments, bool required)
         return;
     }
     process.WaitForExit(30000);
-    Log($"rustdesk_service_command exit={process.ExitCode}");
+    Log($"service_control_command exit={process.ExitCode}");
     if (required && process.ExitCode != 0)
-        throw new InvalidOperationException("无法停止 RustDesk 服务");
+        throw new InvalidOperationException("无法配置 Windows 服务");
 }
 
 void CopyPayloadToFinal(string sourceRoot, string destinationRoot)
@@ -377,32 +377,55 @@ void DisableCustomerAgentStartup()
     using var key = Microsoft.Win32.Registry.LocalMachine.CreateSubKey(
         @"Software\Microsoft\Windows\CurrentVersion\Run");
     key!.DeleteValue("RemoteInstallCustomerAgent", false);
-    RunScheduledTaskCommand("/Delete /TN \"RemoteInstallCustomerAgent\" /F", false);
+    RunScheduledTaskCommand(false, "/Delete", "/TN", "RemoteInstallCustomerAgent", "/F");
     Log("customer_agent_startup_disabled");
 }
 
 void ConfigureCustomerAgentStartup(string agent)
 {
-    // Older Task Scheduler versions reject the XML ServiceAccount LogonType.
-    // schtasks creates the same boot task with the portable SYSTEM account syntax.
-    var taskCommand = $"\\\"{agent}\\\"";
-    RunScheduledTaskCommand(
-        $"/Create /TN \"RemoteInstallCustomerAgent\" /TR \"{taskCommand}\" /SC ONSTART /RU SYSTEM /RL HIGHEST /F", true);
-    RunScheduledTaskCommand("/Run /TN \"RemoteInstallCustomerAgent\"", true);
+    try
+    {
+        RunAgentServiceCommand(agent, "install --startup auto", true);
+        ConfigureCustomerAgentServiceRecovery();
+        RunAgentServiceCommand(agent, "start", true);
+        Log("customer_agent_service_configured account=LocalSystem");
+        return;
+    }
+    catch (Exception ex)
+    {
+        Log($"customer_agent_service_fallback type={ex.GetType().Name}");
+        RunAgentServiceCommand(agent, "remove", false);
+    }
+
+    // Older Task Scheduler versions reject XML ServiceAccount settings. ArgumentList
+    // keeps the executable path intact without depending on command-line escaping.
+    RunScheduledTaskCommand(true,
+        "/Create", "/TN", "RemoteInstallCustomerAgent", "/TR", agent,
+        "/SC", "ONSTART", "/RU", "SYSTEM", "/RL", "HIGHEST", "/F");
+    RunScheduledTaskCommand(true, "/Run", "/TN", "RemoteInstallCustomerAgent");
     Log("customer_agent_scheduled_task_configured trigger=ONSTART account=SYSTEM");
 }
 
-void RunScheduledTaskCommand(string arguments, bool required)
+void ConfigureCustomerAgentServiceRecovery()
 {
-    using var process = Process.Start(new ProcessStartInfo
+    RunServiceControlCommand(
+        "failure \"RemoteInstallCustomerAgent\" reset= 0 actions= restart/60000/restart/60000/restart/60000", true);
+    RunServiceControlCommand("failureflag \"RemoteInstallCustomerAgent\" 1", false);
+}
+
+void RunScheduledTaskCommand(bool required, params string[] arguments)
+{
+    var startInfo = new ProcessStartInfo
     {
         FileName = "schtasks.exe",
-        Arguments = arguments,
         UseShellExecute = false,
         RedirectStandardOutput = true,
         RedirectStandardError = true,
         CreateNoWindow = true,
-    });
+    };
+    foreach (var argument in arguments)
+        startInfo.ArgumentList.Add(argument);
+    using var process = Process.Start(startInfo);
     if (process is null)
     {
         if (required) throw new InvalidOperationException("无法启动 Windows 任务计划程序");

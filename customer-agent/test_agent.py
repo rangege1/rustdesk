@@ -33,8 +33,12 @@ class CustomerAgentTests(unittest.TestCase):
         source = Path(__file__).resolve().parents[1] / "customer-installer" / "Program.cs"
         source = source.read_text(encoding="utf-8")
         self.assertIn("void ConfigureCustomerAgentStartup(string agent)", source)
-        self.assertIn("/SC ONSTART /RU SYSTEM /RL HIGHEST /F", source)
-        self.assertIn('RunScheduledTaskCommand("/Run /TN', source)
+        self.assertIn('RunAgentServiceCommand(agent, "install --startup auto", true);', source)
+        self.assertIn('RunAgentServiceCommand(agent, "start", true);', source)
+        self.assertIn('ConfigureCustomerAgentServiceRecovery();', source)
+        self.assertIn('actions= restart/60000/restart/60000/restart/60000', source)
+        self.assertIn('"/SC", "ONSTART", "/RU", "SYSTEM", "/RL", "HIGHEST", "/F"', source)
+        self.assertIn("startInfo.ArgumentList.Add(argument);", source)
         self.assertIn('RemoteInstallCustomerAgent', source)
         self.assertNotIn("<LogonType>ServiceAccount</LogonType>", source)
 
