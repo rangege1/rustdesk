@@ -49,6 +49,9 @@ class CustomerAgentTests(unittest.TestCase):
         self.assertIn('RunServiceControlCommand($"stop \\"{service}\\"", false);', source)
         self.assertIn("FileAttributes.ReadOnly", source)
         self.assertIn("PrepareRustDeskNativeInstall();", source)
+        self.assertIn("void PrepareFinalInstall(string destinationRoot)", source)
+        self.assertIn("RunIcaclsCommand", source)
+        self.assertIn("PrepareFinalInstall(finalInstallRoot);", source)
 
     def test_rustdesk_id_retries_until_client_is_ready(self):
         executable = Path(agent.executable_dir()) / "rustdesk.exe"

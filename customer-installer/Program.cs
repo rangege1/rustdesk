@@ -164,6 +164,7 @@ try
     }
 
     InstallRustDesk(rustDesk, installRoot);
+    PrepareFinalInstall(finalInstallRoot);
     CopyPayloadToFinal(installRoot, finalInstallRoot);
     rustDesk = Path.Combine(finalInstallRoot, "rustdesk.exe");
     if (!File.Exists(rustDesk))
@@ -315,6 +316,45 @@ void PrepareRustDeskNativeInstall()
         }
     }
     Log("rustdesk_native_install_prepared");
+}
+
+void PrepareFinalInstall(string destinationRoot)
+{
+    // The native installer can start RustDesk again before the payload is copied.
+    // Stop it once more and repair ACLs left by an older elevated installation.
+    StopProcesses("rustdesk");
+    foreach (var service in new[] { "RustDesk", "RustDeskService" })
+        RunServiceControlCommand($"stop \"{service}\"", false);
+    if (!Directory.Exists(destinationRoot))
+        return;
+
+    RunIcaclsCommand($"\"{destinationRoot}\" /grant *S-1-5-32-544:(OI)(CI)F /T /C");
+    foreach (var file in Directory.EnumerateFiles(destinationRoot, "*", SearchOption.AllDirectories))
+    {
+        try { File.SetAttributes(file, File.GetAttributes(file) & ~FileAttributes.ReadOnly); }
+        catch (Exception ex) { Log($"final_attribute_clear_failed file={Path.GetFileName(file)} type={ex.GetType().Name}"); }
+    }
+    Log($"final_install_prepared root={destinationRoot}");
+}
+
+void RunIcaclsCommand(string arguments)
+{
+    using var process = Process.Start(new ProcessStartInfo
+    {
+        FileName = "icacls.exe",
+        Arguments = arguments,
+        UseShellExecute = false,
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+        CreateNoWindow = true,
+    });
+    if (process is null)
+        throw new InvalidOperationException("无法启动文件权限修复程序");
+    var output = process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd();
+    process.WaitForExit(30000);
+    Log($"final_acl_command exit={process.ExitCode}");
+    if (process.ExitCode != 0)
+        throw new InvalidOperationException($"无法修复安装目录权限：{output.Trim()}");
 }
 
 void RunServiceControlCommand(string arguments, bool required)
