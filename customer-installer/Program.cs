@@ -425,22 +425,22 @@ void ConfigureCustomerAgentStartup(string agent)
 {
     try
     {
-        RunAgentServiceCommand(agent, "install --startup auto", true);
+        RunAgentServiceCommand(agent, true, "install", "--startup=auto");
         ConfigureCustomerAgentServiceRecovery();
-        RunAgentServiceCommand(agent, "start", true);
+        RunAgentServiceCommand(agent, true, "start");
         Log("customer_agent_service_configured account=LocalSystem");
         return;
     }
     catch (Exception ex)
     {
         Log($"customer_agent_service_fallback type={ex.GetType().Name}");
-        RunAgentServiceCommand(agent, "remove", false);
+        RunAgentServiceCommand(agent, false, "remove");
     }
 
     // Older Task Scheduler versions reject XML ServiceAccount settings. ArgumentList
     // keeps the executable path intact without depending on command-line escaping.
     RunScheduledTaskCommand(true,
-        "/Create", "/TN", "RemoteInstallCustomerAgent", "/TR", agent,
+        "/Create", "/TN", "RemoteInstallCustomerAgent", "/TR", $"\"{agent}\"",
         "/SC", "ONSTART", "/RU", "SYSTEM", "/RL", "HIGHEST", "/F");
     RunScheduledTaskCommand(true, "/Run", "/TN", "RemoteInstallCustomerAgent");
     Log("customer_agent_scheduled_task_configured trigger=ONSTART account=SYSTEM");
@@ -483,23 +483,26 @@ void StopCustomerAgentService()
     var agent = Path.Combine(customerInstallRoot, "customer-agent.exe");
     if (!File.Exists(agent))
         return;
-    RunAgentServiceCommand(agent, "stop", false);
-    RunAgentServiceCommand(agent, "remove", false);
+    RunAgentServiceCommand(agent, false, "stop");
+    RunAgentServiceCommand(agent, false, "remove");
     Log("customer_agent_service_removed");
 }
 
-void RunAgentServiceCommand(string agent, string command, bool required)
+void RunAgentServiceCommand(string agent, bool required, params string[] arguments)
 {
-    using var process = Process.Start(new ProcessStartInfo
+    var startInfo = new ProcessStartInfo
     {
         FileName = agent,
-        Arguments = command,
         WorkingDirectory = Path.GetDirectoryName(agent)!,
         UseShellExecute = false,
         RedirectStandardOutput = true,
         RedirectStandardError = true,
         CreateNoWindow = true,
-    });
+    };
+    foreach (var argument in arguments)
+        startInfo.ArgumentList.Add(argument);
+    using var process = Process.Start(startInfo);
+    var command = string.Join(" ", arguments);
     if (process is null)
     {
         if (required) throw new InvalidOperationException($"无法执行 Agent 服务命令 {command}");
