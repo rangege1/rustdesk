@@ -549,30 +549,42 @@ class CustomerAgent:
             import win32security
             import win32ts
 
-            session_id = win32ts.WTSGetActiveConsoleSessionId()
-            user_token = win32ts.WTSQueryUserToken(session_id)
-            primary_token = win32security.DuplicateTokenEx(
-                user_token,
-                win32security.MAXIMUM_ALLOWED,
-                win32con.SecurityIdentification,
-                win32security.TokenPrimary,
-            )
-            startup = win32process.STARTUPINFO()
-            startup.lpDesktop = "winsta0\\default"
-            win32process.CreateProcessAsUser(
-                primary_token,
-                None,
-                command,
-                None,
-                None,
-                False,
-                win32con.CREATE_NEW_CONSOLE,
-                None,
-                str(installer.parent),
-                startup,
-            )
-            LOGGER.info("installer_launch_ok interactive_session=%s", session_id)
-            return
+            sessions = [
+                int(session[0])
+                for session in win32ts.WTSEnumerateSessions(win32ts.WTS_CURRENT_SERVER_HANDLE, 0, 1)
+                if int(session[2]) == win32ts.WTSActive
+            ]
+            console_session = win32ts.WTSGetActiveConsoleSessionId()
+            if console_session not in sessions:
+                sessions.append(console_session)
+            for session_id in sessions:
+                try:
+                    user_token = win32ts.WTSQueryUserToken(session_id)
+                    primary_token = win32security.DuplicateTokenEx(
+                        user_token,
+                        win32security.MAXIMUM_ALLOWED,
+                        win32con.SecurityIdentification,
+                        win32security.TokenPrimary,
+                    )
+                    startup = win32process.STARTUPINFO()
+                    startup.lpDesktop = "winsta0\\default"
+                    win32process.CreateProcessAsUser(
+                        primary_token,
+                        None,
+                        command,
+                        None,
+                        None,
+                        False,
+                        win32con.CREATE_NEW_CONSOLE,
+                        None,
+                        str(installer.parent),
+                        startup,
+                    )
+                    LOGGER.info("installer_launch_ok interactive_session=%s", session_id)
+                    return
+                except Exception as session_error:
+                    LOGGER.warning("installer_session_launch_failed session=%s type=%s", session_id, type(session_error).__name__)
+            raise RuntimeError("没有可用的登录用户桌面")
         except Exception as exc:
             LOGGER.warning("installer_interactive_launch_failed type=%s", type(exc).__name__)
 
