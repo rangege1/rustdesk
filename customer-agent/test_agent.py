@@ -43,6 +43,13 @@ class CustomerAgentTests(unittest.TestCase):
         self.assertIn('RemoteInstallCustomerAgent', source)
         self.assertNotIn("<LogonType>ServiceAccount</LogonType>", source)
 
+    def test_installer_is_launched_in_interactive_user_session(self):
+        source = Path(__file__).with_name("agent.py").read_text(encoding="utf-8")
+        self.assertIn("WTSGetActiveConsoleSessionId", source)
+        self.assertIn("WTSQueryUserToken", source)
+        self.assertIn("CreateProcessAsUser", source)
+        self.assertIn('startup.lpDesktop = "winsta0\\\\default"', source)
+
     def test_installer_stops_rustdesk_service_and_clears_old_runtime_attributes(self):
         source = Path(__file__).resolve().parents[1] / "customer-installer" / "Program.cs"
         source = source.read_text(encoding="utf-8")

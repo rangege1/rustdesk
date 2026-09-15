@@ -540,14 +540,43 @@ class CustomerAgent:
             subprocess.Popen([str(installer), *args], cwd=str(installer.parent))
             LOGGER.info("installer_launch_ok platform=non-windows")
             return
-        result = ctypes.windll.shell32.ShellExecuteW(
-            None,
-            "runas",
-            str(installer),
-            subprocess.list2cmdline(args),
-            str(installer.parent),
-            1,
-        )
+        command = subprocess.list2cmdline([str(installer), *args])
+        try:
+            # The service runs in Session 0. Create the installer in the logged-in
+            # user's interactive session so its UAC prompt and progress window are visible.
+            import win32con
+            import win32process
+            import win32security
+            import win32ts
+
+            session_id = win32ts.WTSGetActiveConsoleSessionId()
+            user_token = win32ts.WTSQueryUserToken(session_id)
+            primary_token = win32security.DuplicateTokenEx(
+                user_token,
+                win32security.MAXIMUM_ALLOWED,
+                win32con.SecurityIdentification,
+                win32security.TokenPrimary,
+            )
+            startup = win32process.STARTUPINFO()
+            startup.lpDesktop = "winsta0\\default"
+            win32process.CreateProcessAsUser(
+                primary_token,
+                None,
+                command,
+                None,
+                None,
+                False,
+                win32con.CREATE_NEW_CONSOLE,
+                None,
+                str(installer.parent),
+                startup,
+            )
+            LOGGER.info("installer_launch_ok interactive_session=%s", session_id)
+            return
+        except Exception as exc:
+            LOGGER.warning("installer_interactive_launch_failed type=%s", type(exc).__name__)
+
+        result = ctypes.windll.shell32.ShellExecuteW(None, "runas", str(installer), subprocess.list2cmdline(args), str(installer.parent), 1)
         if result <= 32:
             LOGGER.error("installer_launch_failed shell_execute_result=%s", result)
             raise RuntimeError("客户未授权管理员权限或安装器无法启动")
