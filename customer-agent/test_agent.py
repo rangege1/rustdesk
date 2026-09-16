@@ -51,6 +51,8 @@ class CustomerAgentTests(unittest.TestCase):
         self.assertIn("WTSQueryUserToken", source)
         self.assertIn("CreateProcessAsUser", source)
         self.assertIn('startup.lpDesktop = "winsta0\\\\default"', source)
+        self.assertNotIn("ShellExecuteW", source)
+        self.assertIn("任务已停止，未在后台静默执行", source)
 
     def test_installer_starts_rustdesk_only_from_final_runtime_directory(self):
         source = Path(__file__).resolve().parents[1] / "customer-installer" / "Program.cs"

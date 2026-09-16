@@ -22,7 +22,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
-AGENT_VERSION = "0.2.18"
+AGENT_VERSION = "0.2.19"
 POLL_SECONDS = 3
 HEARTBEAT_SECONDS = 60
 RUSTDESK_ID_HEARTBEAT_RETRY_SECONDS = 10
@@ -586,13 +586,8 @@ class CustomerAgent:
                     LOGGER.warning("installer_session_launch_failed session=%s type=%s", session_id, type(session_error).__name__)
             raise RuntimeError("没有可用的登录用户桌面")
         except Exception as exc:
-            LOGGER.warning("installer_interactive_launch_failed type=%s", type(exc).__name__)
-
-        result = ctypes.windll.shell32.ShellExecuteW(None, "runas", str(installer), subprocess.list2cmdline(args), str(installer.parent), 1)
-        if result <= 32:
-            LOGGER.error("installer_launch_failed shell_execute_result=%s", result)
-            raise RuntimeError("客户未授权管理员权限或安装器无法启动")
-        LOGGER.info("installer_launch_ok shell_execute_result=%s", result)
+            LOGGER.exception("installer_interactive_launch_failed type=%s", type(exc).__name__)
+            raise RuntimeError("安装器未能启动到客户当前桌面，任务已停止，未在后台静默执行") from exc
 
     def update_active_tasks(self) -> None:
         for task_id, status_file in list(self.active_tasks.items()):
