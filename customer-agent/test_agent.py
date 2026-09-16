@@ -52,16 +52,15 @@ class CustomerAgentTests(unittest.TestCase):
         self.assertIn("CreateProcessAsUser", source)
         self.assertIn('startup.lpDesktop = "winsta0\\\\default"', source)
 
-    def test_installer_stops_rustdesk_service_and_clears_old_runtime_attributes(self):
+    def test_installer_starts_rustdesk_only_from_final_runtime_directory(self):
         source = Path(__file__).resolve().parents[1] / "customer-installer" / "Program.cs"
         source = source.read_text(encoding="utf-8")
-        self.assertIn("void PrepareRustDeskNativeInstall()", source)
-        self.assertIn('RunServiceControlCommand($"stop \\"{service}\\"", false);', source)
         self.assertIn("FileAttributes.ReadOnly", source)
-        self.assertIn("PrepareRustDeskNativeInstall();", source)
         self.assertIn("void PrepareFinalInstall(string destinationRoot)", source)
         self.assertIn("RunIcaclsCommand", source)
         self.assertIn("PrepareFinalInstall(finalInstallRoot);", source)
+        self.assertIn("StartChild(rustDesk, \"rustdesk\", finalInstallRoot);", source)
+        self.assertNotIn("--silent-install", source)
 
     def test_rustdesk_id_retries_until_client_is_ready(self):
         executable = Path(agent.executable_dir()) / "rustdesk.exe"

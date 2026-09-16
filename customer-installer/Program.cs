@@ -163,7 +163,6 @@ try
             throw new InvalidOperationException("安装包不完整，缺少客服 Worker 或配置文件");
     }
 
-    InstallRustDesk(rustDesk, installRoot);
     PrepareFinalInstall(finalInstallRoot);
     CopyPayloadToFinal(installRoot, finalInstallRoot);
     rustDesk = Path.Combine(finalInstallRoot, "rustdesk.exe");
@@ -264,58 +263,6 @@ void StartChild(string executable, string name, string installRoot)
         throw new InvalidOperationException($"无法启动 {name}");
     Log($"child_process_started name={name} pid={process.Id}");
     process.Dispose();
-}
-
-void InstallRustDesk(string rustDesk, string installRoot)
-{
-    PrepareRustDeskNativeInstall();
-    using var process = Process.Start(new ProcessStartInfo
-    {
-        FileName = rustDesk,
-        Arguments = "--silent-install",
-        WorkingDirectory = installRoot,
-        UseShellExecute = false,
-        RedirectStandardOutput = true,
-        RedirectStandardError = true,
-        CreateNoWindow = true,
-    });
-    if (process is null)
-        throw new InvalidOperationException("无法启动 RustDesk 原生安装");
-    if (!process.WaitForExit(120000))
-    {
-        process.Kill(true);
-        throw new InvalidOperationException("RustDesk 原生安装超时");
-    }
-    var output = process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd();
-    if (process.ExitCode != 0)
-        throw new InvalidOperationException($"RustDesk 原生安装失败，退出码 {process.ExitCode}: {output.Trim()}");
-    Log("rustdesk_native_install_ok");
-}
-
-void PrepareRustDeskNativeInstall()
-{
-    // A prior RustDesk service can keep Flutter assets such as auth-okta.svg open.
-    // Stop it before the native installer replaces its Program Files runtime.
-    foreach (var service in new[] { "RustDesk", "RustDeskService" })
-        RunServiceControlCommand($"stop \"{service}\"", false);
-
-    var nativeInstallRoot = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "RustDesk");
-    if (!Directory.Exists(nativeInstallRoot))
-        return;
-
-    foreach (var file in Directory.EnumerateFiles(nativeInstallRoot, "*", SearchOption.AllDirectories))
-    {
-        try
-        {
-            File.SetAttributes(file, File.GetAttributes(file) & ~FileAttributes.ReadOnly);
-        }
-        catch (Exception ex)
-        {
-            Log($"rustdesk_attribute_clear_failed file={Path.GetFileName(file)} type={ex.GetType().Name}");
-        }
-    }
-    Log("rustdesk_native_install_prepared");
 }
 
 void PrepareFinalInstall(string destinationRoot)
