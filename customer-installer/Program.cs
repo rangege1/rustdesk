@@ -86,6 +86,25 @@ if (!IsAdministrator())
     }
 }
 
+using var installMutex = new Mutex(false, @"Global\RemoteInstallRuntimeInstaller");
+var installLockHeld = false;
+try
+{
+    installLockHeld = installMutex.WaitOne(TimeSpan.FromMinutes(10));
+}
+catch (AbandonedMutexException)
+{
+    installLockHeld = true;
+    Log("installer_mutex_recovered");
+}
+if (!installLockHeld)
+{
+    Log("installer_mutex_timeout");
+    ShowError("另一份远程安装程序仍在运行，请等待其完成后重试。");
+    return 1;
+}
+Log("installer_mutex_acquired");
+
 try
 {
     var payload = Assembly.GetExecutingAssembly().GetManifestResourceStream("payload.zip")
@@ -97,7 +116,10 @@ try
     using var roleReader = new StreamReader(roleEntry.Open());
     var role = roleReader.ReadToEnd().Trim();
     var isCustomer = string.Equals(role, "customer", StringComparison.OrdinalIgnoreCase);
-    var installRoot = Path.Combine(bootstrapRoot, isCustomer ? "customer" : "staff");
+    var installRoot = Path.Combine(
+        bootstrapRoot,
+        isCustomer ? "customer" : "staff",
+        Environment.ProcessId.ToString());
     var finalInstallRoot = isCustomer ? customerInstallRoot : staffInstallRoot;
 
     StopProcesses("rustdesk");
@@ -133,8 +155,7 @@ try
 
     var rustDesk = Path.Combine(installRoot, "rustdesk.exe");
     Log($"payload_extract_ok role={(isCustomer ? "customer" : "staff")}");
-    if (!File.Exists(rustDesk))
-        throw new InvalidOperationException("安装包不完整，缺少 RustDesk");
+    ValidateRustDeskRuntime(installRoot);
 
     if (isCustomer)
     {
@@ -165,6 +186,9 @@ try
 
     PrepareFinalInstall(finalInstallRoot);
     CopyPayloadToFinal(installRoot, finalInstallRoot);
+    VerifyRuntimeCopy(installRoot, finalInstallRoot);
+    ValidateRustDeskRuntime(finalInstallRoot);
+    DeleteDirectoryWithRetry(installRoot);
     rustDesk = Path.Combine(finalInstallRoot, "rustdesk.exe");
     if (!File.Exists(rustDesk))
         throw new InvalidOperationException($"RustDesk 运行文件未写入: {rustDesk}");
@@ -193,6 +217,11 @@ catch (Exception ex)
     Log($"installer_failed type={ex.GetType().Name} message={ex.Message.Replace("\r", " ").Replace("\n", " ")}");
     ShowError($"启动失败：{ex.Message}");
     return 1;
+}
+finally
+{
+    installMutex.ReleaseMutex();
+    Log("installer_mutex_released");
 }
 
 static bool IsAdministrator()
@@ -281,7 +310,29 @@ void PrepareFinalInstall(string destinationRoot)
         try { File.SetAttributes(file, File.GetAttributes(file) & ~FileAttributes.ReadOnly); }
         catch (Exception ex) { Log($"final_attribute_clear_failed file={Path.GetFileName(file)} type={ex.GetType().Name}"); }
     }
+    DeleteDirectoryWithRetry(destinationRoot);
     Log($"final_install_prepared root={destinationRoot}");
+}
+
+void DeleteDirectoryWithRetry(string directory)
+{
+    Exception? lastError = null;
+    for (var attempt = 1; attempt <= 12; attempt++)
+    {
+        try
+        {
+            if (Directory.Exists(directory))
+                Directory.Delete(directory, true);
+            return;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            lastError = ex;
+            Log($"directory_delete_retry path={directory} attempt={attempt} type={ex.GetType().Name}");
+            Thread.Sleep(500);
+        }
+    }
+    throw new IOException($"无法清理旧版安装目录 {directory}", lastError);
 }
 
 void RunIcaclsCommand(string arguments)
@@ -337,6 +388,44 @@ void CopyPayloadToFinal(string sourceRoot, string destinationRoot)
         CopyFileWithRetry(source, destination, relativePath);
     }
     Log($"runtime_copy_ok install_root={destinationRoot}");
+}
+
+void ValidateRustDeskRuntime(string root)
+{
+    foreach (var fileName in new[]
+    {
+        "rustdesk.exe",
+        "librustdesk.dll",
+        "flutter_windows.dll",
+        "desktop_multi_window_plugin.dll",
+    })
+    {
+        var path = Path.Combine(root, fileName);
+        if (!File.Exists(path) || new FileInfo(path).Length < 4096)
+            throw new InvalidOperationException($"RustDesk 运行时不完整：{fileName}");
+        using var stream = File.OpenRead(path);
+        if (stream.ReadByte() != 'M' || stream.ReadByte() != 'Z')
+            throw new InvalidOperationException($"RustDesk 运行文件格式无效：{fileName}");
+    }
+    Log($"runtime_structure_verified root={root}");
+}
+
+void VerifyRuntimeCopy(string sourceRoot, string destinationRoot)
+{
+    foreach (var source in Directory.EnumerateFiles(sourceRoot, "*", SearchOption.AllDirectories))
+    {
+        var relativePath = Path.GetRelativePath(sourceRoot, source);
+        var destination = Path.Combine(destinationRoot, relativePath);
+        if (!File.Exists(destination) || new FileInfo(source).Length != new FileInfo(destination).Length)
+            throw new IOException($"运行文件复制不完整：{relativePath}");
+        using var sourceStream = File.OpenRead(source);
+        using var destinationStream = File.OpenRead(destination);
+        var sourceHash = SHA256.HashData(sourceStream);
+        var destinationHash = SHA256.HashData(destinationStream);
+        if (!CryptographicOperations.FixedTimeEquals(sourceHash, destinationHash))
+            throw new IOException($"运行文件复制校验失败：{relativePath}");
+    }
+    Log($"runtime_hash_verified install_root={destinationRoot}");
 }
 
 void CopyFileWithRetry(string source, string destination, string relativePath)

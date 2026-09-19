@@ -22,7 +22,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
-AGENT_VERSION = "0.2.19"
+AGENT_VERSION = "0.2.20"
 POLL_SECONDS = 3
 HEARTBEAT_SECONDS = 60
 RUSTDESK_ID_HEARTBEAT_RETRY_SECONDS = 10

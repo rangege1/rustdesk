@@ -31,6 +31,43 @@ $publishDir = Join-Path $stage "publish"
 New-Item -ItemType Directory -Force $payloadDir | Out-Null
 
 try {
+    $requiredRuntime = @(
+        "rustdesk.exe",
+        "librustdesk.dll",
+        "flutter_windows.dll",
+        "desktop_multi_window_plugin.dll"
+    )
+    foreach ($fileName in $requiredRuntime) {
+        $filePath = Join-Path $rustDesk $fileName
+        if (-not (Test-Path $filePath) -or (Get-Item $filePath).Length -lt 4096) {
+            throw "RustDesk 运行时不完整：$fileName"
+        }
+        $stream = [IO.File]::OpenRead($filePath)
+        try {
+            if ($stream.ReadByte() -ne 0x4d -or $stream.ReadByte() -ne 0x5a) {
+                throw "RustDesk 运行文件格式无效：$fileName"
+            }
+        }
+        finally {
+            $stream.Dispose()
+        }
+        Get-FileHash $filePath -Algorithm SHA256
+    }
+
+    $smokeOut = Join-Path $stage "rustdesk-version.out"
+    $smokeErr = Join-Path $stage "rustdesk-version.err"
+    $smoke = Start-Process -FilePath (Join-Path $rustDesk "rustdesk.exe") -ArgumentList "--version" `
+        -WorkingDirectory $rustDesk -PassThru -NoNewWindow `
+        -RedirectStandardOutput $smokeOut -RedirectStandardError $smokeErr
+    if (-not $smoke.WaitForExit(30000)) {
+        $smoke.Kill($true)
+        throw "RustDesk 运行时自检超时"
+    }
+    if ($smoke.ExitCode -ne 0) {
+        $detail = ((Get-Content $smokeOut, $smokeErr -Raw -ErrorAction SilentlyContinue) -join " ").Trim()
+        throw "RustDesk 运行时自检失败，退出码 $($smoke.ExitCode)：$detail"
+    }
+
     # Only package the RustDesk runtime. Build outputs, symbols, optional drivers,
     # and helper archives can make the self-extracting EXE unnecessarily large.
     Copy-Item (Join-Path $rustDesk "rustdesk.exe") $payloadDir -Force
