@@ -22,7 +22,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
-AGENT_VERSION = "0.2.20"
+AGENT_VERSION = "0.2.21"
 POLL_SECONDS = 3
 HEARTBEAT_SECONDS = 60
 RUSTDESK_ID_HEARTBEAT_RETRY_SECONDS = 10
@@ -544,46 +544,73 @@ class CustomerAgent:
         try:
             # The service runs in Session 0. Create the installer in the logged-in
             # user's interactive session so its UAC prompt and progress window are visible.
+            import win32api
             import win32con
             import win32process
+            import win32profile
             import win32security
             import win32ts
 
             sessions = [
                 int(session[0])
                 for session in win32ts.WTSEnumerateSessions(win32ts.WTS_CURRENT_SERVER_HANDLE, 0, 1)
-                if int(session[2]) == win32ts.WTSActive
+                if int(session[2]) == win32ts.WTSActive and int(session[0]) != 0xFFFFFFFF
             ]
             console_session = win32ts.WTSGetActiveConsoleSessionId()
-            if console_session not in sessions:
+            if console_session != 0xFFFFFFFF and console_session not in sessions:
                 sessions.append(console_session)
             for session_id in sessions:
+                user_token = None
+                primary_token = None
+                environment = None
                 try:
                     user_token = win32ts.WTSQueryUserToken(session_id)
                     primary_token = win32security.DuplicateTokenEx(
                         user_token,
                         win32security.MAXIMUM_ALLOWED,
-                        win32con.SecurityIdentification,
+                        win32security.SecurityImpersonation,
                         win32security.TokenPrimary,
                     )
+                    environment = win32profile.CreateEnvironmentBlock(primary_token, False)
                     startup = win32process.STARTUPINFO()
                     startup.lpDesktop = "winsta0\\default"
-                    win32process.CreateProcessAsUser(
+                    startup.dwFlags = win32con.STARTF_USESHOWWINDOW
+                    startup.wShowWindow = win32con.SW_SHOWNORMAL
+                    process_info = win32process.CreateProcessAsUser(
                         primary_token,
                         None,
                         command,
                         None,
                         None,
                         False,
-                        win32con.CREATE_NEW_CONSOLE,
-                        None,
+                        win32con.CREATE_NEW_CONSOLE | win32con.CREATE_UNICODE_ENVIRONMENT,
+                        environment,
                         str(installer.parent),
                         startup,
                     )
+                    for handle in process_info[:2]:
+                        win32api.CloseHandle(handle)
                     LOGGER.info("installer_launch_ok interactive_session=%s", session_id)
                     return
                 except Exception as session_error:
-                    LOGGER.warning("installer_session_launch_failed session=%s type=%s", session_id, type(session_error).__name__)
+                    LOGGER.warning(
+                        "installer_session_launch_failed session=%s type=%s winerror=%s",
+                        session_id,
+                        type(session_error).__name__,
+                        getattr(session_error, "winerror", None),
+                    )
+                finally:
+                    if environment is not None:
+                        try:
+                            win32profile.DestroyEnvironmentBlock(environment)
+                        except Exception:
+                            pass
+                    for token in (primary_token, user_token):
+                        if token is not None:
+                            try:
+                                win32api.CloseHandle(token)
+                            except Exception:
+                                pass
             raise RuntimeError("没有可用的登录用户桌面")
         except Exception as exc:
             LOGGER.exception("installer_interactive_launch_failed type=%s", type(exc).__name__)

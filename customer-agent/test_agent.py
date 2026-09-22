@@ -54,6 +54,14 @@ class CustomerAgentTests(unittest.TestCase):
         self.assertNotIn("ShellExecuteW", source)
         self.assertIn("任务已停止，未在后台静默执行", source)
 
+    def test_interactive_launch_uses_a_real_primary_token_environment(self):
+        source = Path(__file__).with_name("agent.py").read_text(encoding="utf-8")
+        self.assertIn("SecurityImpersonation", source)
+        self.assertIn("CreateEnvironmentBlock", source)
+        self.assertIn("CREATE_UNICODE_ENVIRONMENT", source)
+        self.assertIn("WTSActive", source)
+        self.assertIn("console_session != 0xFFFFFFFF", source)
+
     def test_installer_starts_rustdesk_only_from_final_runtime_directory(self):
         source = Path(__file__).resolve().parents[1] / "customer-installer" / "Program.cs"
         source = source.read_text(encoding="utf-8")
