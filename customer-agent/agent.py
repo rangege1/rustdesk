@@ -568,6 +568,7 @@ class CustomerAgent:
                     primary_token = win32security.DuplicateTokenEx(
                         user_token,
                         win32security.MAXIMUM_ALLOWED,
+                        None,
                         win32security.SecurityImpersonation,
                         win32security.TokenPrimary,
                     )

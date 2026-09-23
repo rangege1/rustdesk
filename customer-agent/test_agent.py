@@ -57,6 +57,7 @@ class CustomerAgentTests(unittest.TestCase):
     def test_interactive_launch_uses_a_real_primary_token_environment(self):
         source = Path(__file__).with_name("agent.py").read_text(encoding="utf-8")
         self.assertIn("SecurityImpersonation", source)
+        self.assertIn("win32security.MAXIMUM_ALLOWED,\n                        None,\n                        win32security.SecurityImpersonation", source)
         self.assertIn("CreateEnvironmentBlock", source)
         self.assertIn("CREATE_UNICODE_ENVIRONMENT", source)
         self.assertIn("WTSActive", source)
