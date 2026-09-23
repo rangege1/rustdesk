@@ -22,7 +22,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
-AGENT_VERSION = "0.2.22"
+AGENT_VERSION = "0.2.23"
 POLL_SECONDS = 3
 HEARTBEAT_SECONDS = 60
 RUSTDESK_ID_HEARTBEAT_RETRY_SECONDS = 10
@@ -551,6 +551,36 @@ class CustomerAgent:
             import win32security
             import win32ts
 
+            # LocalSystem normally owns these privileges, but Windows can leave
+            # them disabled in the service token. CreateProcessAsUser requires
+            # them to be enabled when crossing from Session 0 to the user's
+            # interactive session.
+            process_token = None
+            try:
+                process_token = win32security.OpenProcessToken(
+                    win32api.GetCurrentProcess(),
+                    win32security.TOKEN_ADJUST_PRIVILEGES | win32security.TOKEN_QUERY,
+                )
+                for privilege_name in ("SeIncreaseQuotaPrivilege", "SeAssignPrimaryTokenPrivilege"):
+                    privilege = win32security.LookupPrivilegeValue(None, privilege_name)
+                    win32security.AdjustTokenPrivileges(
+                        process_token,
+                        False,
+                        [(privilege, win32security.SE_PRIVILEGE_ENABLED)],
+                    )
+            except Exception as privilege_error:
+                LOGGER.warning(
+                    "installer_process_privilege_enable_failed type=%s winerror=%s",
+                    type(privilege_error).__name__,
+                    getattr(privilege_error, "winerror", None),
+                )
+            finally:
+                if process_token is not None:
+                    try:
+                        win32api.CloseHandle(process_token)
+                    except Exception:
+                        pass
+
             sessions = [
                 int(session[0])
                 for session in win32ts.WTSEnumerateSessions(win32ts.WTS_CURRENT_SERVER_HANDLE, 0, 1)
@@ -559,6 +589,7 @@ class CustomerAgent:
             console_session = win32ts.WTSGetActiveConsoleSessionId()
             if console_session != 0xFFFFFFFF and console_session not in sessions:
                 sessions.append(console_session)
+            session_errors = []
             for session_id in sessions:
                 user_token = None
                 primary_token = None
@@ -572,11 +603,24 @@ class CustomerAgent:
                         win32security.SecurityImpersonation,
                         win32security.TokenPrimary,
                     )
-                    environment = win32profile.CreateEnvironmentBlock(primary_token, False)
+                    try:
+                        environment = win32profile.CreateEnvironmentBlock(primary_token, False)
+                    except Exception as environment_error:
+                        # An environment block is helpful but not required. Some
+                        # Windows builds deny this call for a remote session.
+                        LOGGER.warning(
+                            "installer_environment_block_failed session=%s type=%s winerror=%s",
+                            session_id,
+                            type(environment_error).__name__,
+                            getattr(environment_error, "winerror", None),
+                        )
                     startup = win32process.STARTUPINFO()
                     startup.lpDesktop = "winsta0\\default"
                     startup.dwFlags = win32con.STARTF_USESHOWWINDOW
                     startup.wShowWindow = win32con.SW_SHOWNORMAL
+                    creation_flags = win32con.CREATE_NEW_CONSOLE
+                    if environment is not None:
+                        creation_flags |= win32con.CREATE_UNICODE_ENVIRONMENT
                     process_info = win32process.CreateProcessAsUser(
                         primary_token,
                         None,
@@ -584,7 +628,7 @@ class CustomerAgent:
                         None,
                         None,
                         False,
-                        win32con.CREATE_NEW_CONSOLE | win32con.CREATE_UNICODE_ENVIRONMENT,
+                        creation_flags,
                         environment,
                         str(installer.parent),
                         startup,
@@ -594,6 +638,9 @@ class CustomerAgent:
                     LOGGER.info("installer_launch_ok interactive_session=%s", session_id)
                     return
                 except Exception as session_error:
+                    session_errors.append(
+                        f"{session_id}:{type(session_error).__name__}:{getattr(session_error, 'winerror', None)}"
+                    )
                     LOGGER.warning(
                         "installer_session_launch_failed session=%s type=%s winerror=%s",
                         session_id,
@@ -612,10 +659,13 @@ class CustomerAgent:
                                 win32api.CloseHandle(token)
                             except Exception:
                                 pass
-            raise RuntimeError("没有可用的登录用户桌面")
+            details = ",".join(session_errors) or "无活动会话"
+            raise RuntimeError(f"没有可用的登录用户桌面（{details}）")
         except Exception as exc:
             LOGGER.exception("installer_interactive_launch_failed type=%s", type(exc).__name__)
-            raise RuntimeError("安装器未能启动到客户当前桌面，任务已停止，未在后台静默执行") from exc
+            raise RuntimeError(
+                f"安装器未能启动到客户当前桌面，任务已停止，未在后台静默执行：{exc}"
+            ) from exc
 
     def update_active_tasks(self) -> None:
         for task_id, status_file in list(self.active_tasks.items()):
