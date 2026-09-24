@@ -57,7 +57,7 @@ class CustomerAgentTests(unittest.TestCase):
     def test_interactive_launch_uses_a_real_primary_token_environment(self):
         source = Path(__file__).with_name("agent.py").read_text(encoding="utf-8")
         self.assertIn("SecurityImpersonation", source)
-        self.assertIn("win32security.MAXIMUM_ALLOWED,\n                        None,\n                        win32security.SecurityImpersonation", source)
+        self.assertIn("win32con.MAXIMUM_ALLOWED,\n                        None,\n                        win32security.SecurityImpersonation", source)
         self.assertIn("CreateEnvironmentBlock", source)
         self.assertIn("CREATE_UNICODE_ENVIRONMENT", source)
         self.assertIn("WTSActive", source)
@@ -67,8 +67,90 @@ class CustomerAgentTests(unittest.TestCase):
         self.assertIn("AdjustTokenPrivileges", source)
         self.assertIn("SeIncreaseQuotaPrivilege", source)
         self.assertIn("SeAssignPrimaryTokenPrivilege", source)
+        self.assertIn("win32con.MAXIMUM_ALLOWED", source)
+        self.assertNotIn("win32security.MAXIMUM_ALLOWED", source)
         self.assertIn("session_errors", source)
         self.assertNotIn("CreateProcessWithTokenW", source)
+
+    def test_active_session_ids_accepts_current_pywin32_dictionary_shape(self):
+        class FakeWin32Ts:
+            WTSActive = 0
+
+            @staticmethod
+            def WTSEnumerateSessions():
+                return (
+                    {"SessionId": 0, "WinStationName": "Services", "State": 4},
+                    {"SessionId": 3, "WinStationName": "Console", "State": 0},
+                )
+
+            @staticmethod
+            def WTSGetActiveConsoleSessionId():
+                return 3
+
+        self.assertEqual(agent.active_windows_session_ids(FakeWin32Ts), [3])
+
+    def test_active_session_ids_falls_back_when_enumeration_fails(self):
+        class FakeWin32Ts:
+            WTSActive = 0
+
+            @staticmethod
+            def WTSEnumerateSessions():
+                raise OSError(87, "WTSEnumerateSessions", "参数错误")
+
+            @staticmethod
+            def WTSGetActiveConsoleSessionId():
+                return 5
+
+        self.assertEqual(agent.active_windows_session_ids(FakeWin32Ts), [5])
+
+    @unittest.skipUnless(agent.os.name == "nt", "Windows-only pywin32 contract")
+    def test_installed_pywin32_wts_enumeration_contract(self):
+        import win32ts
+
+        sessions = win32ts.WTSEnumerateSessions()
+        self.assertIsInstance(sessions, tuple)
+        self.assertTrue(all("SessionId" in session and "State" in session for session in sessions))
+        self.assertTrue(agent.active_windows_session_ids(win32ts))
+
+    @unittest.skipUnless(agent.os.name == "nt", "Windows-only interactive launch")
+    def test_launch_installer_uses_console_session_when_enumeration_returns_error_87(self):
+        import win32api
+        import win32process
+        import win32profile
+        import win32security
+        import win32ts
+
+        instance = agent.CustomerAgent(agent.AgentConfig("https://example.test", 1, "token"))
+        startup = type("StartupInfo", (), {})()
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            win32ts, "WTSEnumerateSessions", side_effect=OSError(87, "WTSEnumerateSessions", "参数错误")
+        ), patch.object(win32ts, "WTSGetActiveConsoleSessionId", return_value=5), patch.object(
+            win32ts, "WTSQueryUserToken", return_value=101
+        ) as query_token, patch.object(
+            win32security, "OpenProcessToken", return_value=100
+        ), patch.object(
+            win32security, "LookupPrivilegeValue", return_value=1
+        ), patch.object(
+            win32security, "AdjustTokenPrivileges"
+        ), patch.object(
+            win32security, "DuplicateTokenEx", return_value=102
+        ), patch.object(
+            win32profile, "CreateEnvironmentBlock", return_value={}
+        ), patch.object(
+            win32process, "STARTUPINFO", return_value=startup
+        ), patch.object(
+            win32process, "CreateProcessAsUser", return_value=(103, 104, 105, 106)
+        ) as create_process, patch.object(
+            win32api, "GetCurrentProcess", return_value=99
+        ), patch.object(
+            win32api, "CloseHandle"
+        ):
+            root = Path(directory)
+            instance.launch_installer(root / "PyMain-task.exe", root / "task.json")
+
+        query_token.assert_called_once_with(5)
+        create_process.assert_called_once()
+
     def test_installer_starts_rustdesk_only_from_final_runtime_directory(self):
         source = Path(__file__).resolve().parents[1] / "customer-installer" / "Program.cs"
         source = source.read_text(encoding="utf-8")

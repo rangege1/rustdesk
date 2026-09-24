@@ -22,7 +22,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
-AGENT_VERSION = "0.2.23"
+AGENT_VERSION = "0.2.24"
 POLL_SECONDS = 3
 HEARTBEAT_SECONDS = 60
 RUSTDESK_ID_HEARTBEAT_RETRY_SECONDS = 10
@@ -126,6 +126,33 @@ def configure_logging() -> logging.Logger:
 
 
 LOGGER = configure_logging()
+
+
+def active_windows_session_ids(win32ts) -> list[int]:
+    sessions: list[int] = []
+    try:
+        for session in win32ts.WTSEnumerateSessions():
+            if isinstance(session, dict):
+                session_id = int(session.get("SessionId", 0xFFFFFFFF))
+                state = int(session.get("State", -1))
+            else:
+                session_id = int(session[0])
+                state = int(session[2])
+            if state == win32ts.WTSActive and session_id != 0xFFFFFFFF:
+                sessions.append(session_id)
+    except Exception as session_enumeration_error:
+        error_code = getattr(session_enumeration_error, "winerror", None)
+        if error_code is None and session_enumeration_error.args:
+            error_code = session_enumeration_error.args[0]
+        LOGGER.warning(
+            "installer_session_enumeration_failed type=%s winerror=%s",
+            type(session_enumeration_error).__name__,
+            error_code,
+        )
+    console_session = win32ts.WTSGetActiveConsoleSessionId()
+    if console_session != 0xFFFFFFFF and console_session not in sessions:
+        sessions.append(console_session)
+    return sessions
 
 
 def ensure_agent_startup() -> bool:
@@ -581,14 +608,7 @@ class CustomerAgent:
                     except Exception:
                         pass
 
-            sessions = [
-                int(session[0])
-                for session in win32ts.WTSEnumerateSessions(win32ts.WTS_CURRENT_SERVER_HANDLE, 0, 1)
-                if int(session[2]) == win32ts.WTSActive and int(session[0]) != 0xFFFFFFFF
-            ]
-            console_session = win32ts.WTSGetActiveConsoleSessionId()
-            if console_session != 0xFFFFFFFF and console_session not in sessions:
-                sessions.append(console_session)
+            sessions = active_windows_session_ids(win32ts)
             session_errors = []
             for session_id in sessions:
                 user_token = None
@@ -598,7 +618,7 @@ class CustomerAgent:
                     user_token = win32ts.WTSQueryUserToken(session_id)
                     primary_token = win32security.DuplicateTokenEx(
                         user_token,
-                        win32security.MAXIMUM_ALLOWED,
+                        win32con.MAXIMUM_ALLOWED,
                         None,
                         win32security.SecurityImpersonation,
                         win32security.TokenPrimary,
