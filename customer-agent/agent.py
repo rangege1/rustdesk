@@ -22,7 +22,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
-AGENT_VERSION = "0.2.24"
+AGENT_VERSION = "0.2.25"
 POLL_SECONDS = 3
 HEARTBEAT_SECONDS = 60
 RUSTDESK_ID_HEARTBEAT_RETRY_SECONDS = 10
@@ -619,9 +619,9 @@ class CustomerAgent:
                     primary_token = win32security.DuplicateTokenEx(
                         user_token,
                         win32con.MAXIMUM_ALLOWED,
-                        None,
                         win32security.SecurityImpersonation,
                         win32security.TokenPrimary,
+                        None,
                     )
                     try:
                         environment = win32profile.CreateEnvironmentBlock(primary_token, False)

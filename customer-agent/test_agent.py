@@ -57,7 +57,10 @@ class CustomerAgentTests(unittest.TestCase):
     def test_interactive_launch_uses_a_real_primary_token_environment(self):
         source = Path(__file__).with_name("agent.py").read_text(encoding="utf-8")
         self.assertIn("SecurityImpersonation", source)
-        self.assertIn("win32con.MAXIMUM_ALLOWED,\n                        None,\n                        win32security.SecurityImpersonation", source)
+        self.assertIn(
+            "win32con.MAXIMUM_ALLOWED,\n                        win32security.SecurityImpersonation,\n                        win32security.TokenPrimary,\n                        None",
+            source,
+        )
         self.assertIn("CreateEnvironmentBlock", source)
         self.assertIn("CREATE_UNICODE_ENVIRONMENT", source)
         self.assertIn("WTSActive", source)
@@ -115,6 +118,7 @@ class CustomerAgentTests(unittest.TestCase):
     @unittest.skipUnless(agent.os.name == "nt", "Windows-only interactive launch")
     def test_launch_installer_uses_console_session_when_enumeration_returns_error_87(self):
         import win32api
+        import win32con
         import win32process
         import win32profile
         import win32security
@@ -134,7 +138,7 @@ class CustomerAgentTests(unittest.TestCase):
             win32security, "AdjustTokenPrivileges"
         ), patch.object(
             win32security, "DuplicateTokenEx", return_value=102
-        ), patch.object(
+        ) as duplicate_token, patch.object(
             win32profile, "CreateEnvironmentBlock", return_value={}
         ), patch.object(
             win32process, "STARTUPINFO", return_value=startup
@@ -149,6 +153,13 @@ class CustomerAgentTests(unittest.TestCase):
             instance.launch_installer(root / "PyMain-task.exe", root / "task.json")
 
         query_token.assert_called_once_with(5)
+        duplicate_token.assert_called_once_with(
+            101,
+            win32con.MAXIMUM_ALLOWED,
+            win32security.SecurityImpersonation,
+            win32security.TokenPrimary,
+            None,
+        )
         create_process.assert_called_once()
 
     def test_installer_starts_rustdesk_only_from_final_runtime_directory(self):
